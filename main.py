@@ -66,6 +66,44 @@ def _load_system_prompt() -> str:
         )
 
 
+# ── Phoneme → ARKit viseme map ────────────────────────────────────────────────
+_VISEME: dict[str, dict] = {
+    # Vowels
+    'a': {'JawOpen': 0.60, 'MouthLowerDownLeft': 0.35, 'MouthLowerDownRight': 0.35, 'MouthUpperUpLeft': 0.18, 'MouthUpperUpRight': 0.18},
+    'e': {'JawOpen': 0.32, 'MouthStretchLeft': 0.42, 'MouthStretchRight': 0.42, 'MouthLowerDownLeft': 0.18, 'MouthLowerDownRight': 0.18},
+    'i': {'JawOpen': 0.18, 'MouthStretchLeft': 0.52, 'MouthStretchRight': 0.52},
+    'o': {'JawOpen': 0.42, 'MouthFunnel': 0.38, 'MouthPucker': 0.18, 'MouthLowerDownLeft': 0.22, 'MouthLowerDownRight': 0.22},
+    'u': {'JawOpen': 0.18, 'MouthPucker': 0.58, 'MouthFunnel': 0.42},
+    # Bilabials — full lip closure
+    'm': {'JawOpen': 0.00, 'MouthClose': 0.92, 'MouthShrugUpper': 0.15},
+    'b': {'JawOpen': 0.04, 'MouthClose': 0.65},
+    'p': {'JawOpen': 0.02, 'MouthClose': 0.80},
+    # Labiodental
+    'f': {'JawOpen': 0.06, 'MouthUpperUpLeft': 0.58, 'MouthUpperUpRight': 0.58, 'MouthLowerDownLeft': 0.12, 'MouthLowerDownRight': 0.12},
+    'v': {'JawOpen': 0.08, 'MouthUpperUpLeft': 0.48, 'MouthUpperUpRight': 0.48},
+    # Sibilants
+    's': {'JawOpen': 0.07, 'MouthStretchLeft': 0.28, 'MouthStretchRight': 0.28},
+    'z': {'JawOpen': 0.10, 'MouthStretchLeft': 0.22, 'MouthStretchRight': 0.22},
+    # Rounded
+    'w': {'JawOpen': 0.14, 'MouthPucker': 0.50, 'MouthFunnel': 0.38},
+    'r': {'JawOpen': 0.20, 'MouthFunnel': 0.18, 'MouthLowerDownLeft': 0.14, 'MouthLowerDownRight': 0.14},
+    # Alveolar
+    'l': {'JawOpen': 0.16, 'MouthLowerDownLeft': 0.10, 'MouthLowerDownRight': 0.10},
+    't': {'JawOpen': 0.10, 'MouthStretchLeft': 0.12, 'MouthStretchRight': 0.12},
+    'd': {'JawOpen': 0.13, 'MouthStretchLeft': 0.10, 'MouthStretchRight': 0.10},
+    'n': {'JawOpen': 0.10},
+    # Fricatives
+    'h': {'JawOpen': 0.28},
+    'j': {'JawOpen': 0.14, 'MouthStretchLeft': 0.18, 'MouthStretchRight': 0.18},
+    'k': {'JawOpen': 0.20}, 'g': {'JawOpen': 0.22}, 'x': {'JawOpen': 0.15},
+    'c': {'JawOpen': 0.10, 'MouthStretchLeft': 0.15, 'MouthStretchRight': 0.15},
+    'q': {'JawOpen': 0.18}, 'y': {'JawOpen': 0.14, 'MouthStretchLeft': 0.20, 'MouthStretchRight': 0.20},
+    # Default consonant
+    '_': {'JawOpen': 0.12, 'MouthShrugUpper': 0.08},
+}
+_WORD_PAUSE = {'JawOpen': 0.04, 'MouthClose': 0.28}   # brief closure between words
+_CHARS_PER_SEC = 13.0   # ~150 wpm × avg 5 chars/word ÷ 60s
+
 # ── Transkripsiyon temizleyici ─────────────────────────────────────────────────
 _CTRL_RE = re.compile(r"<ctrl\d+>", re.IGNORECASE)
 
@@ -492,8 +530,12 @@ class JarvisLive:
         self._audio_buffer: list[bytes] = []
         self._jaw_last_send  = 0.0
         self._jaw_smooth     = 0.0
-        self._last_emotion   = "neutral"
-        self._emotion_sent_at = 0.0   # monotonic time of last emotion broadcast
+        self._last_emotion    = "neutral"
+        self._emotion_sent_at = 0.0
+        self._new_turn        = True
+        self._emotion_event   = None
+        self._viseme_q        = None   # queue.Queue fed per chunk
+        self._viseme_running  = False  # True while viseme worker thread is alive
         self._noise_threshold = 0.0    # 0 = gate off
         self._calib_samples: list[float] = []
         self._calibrating = False
@@ -572,58 +614,94 @@ class JarvisLive:
         pass
 
     def _drive_mouth_from_chunk(self, pcm_bytes: bytes):
-        """Envelope follower + spectral split → 14-channel mouth animation."""
+        """Update amplitude envelope only — viseme thread uses this for scaling."""
         import numpy as np
         try:
             samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
             if len(samples) < 16:
                 return
-
             rms = float(np.sqrt(np.mean(samples ** 2)))
-
-            # Square-root curve keeps small sounds small, cap at 0.42
             raw = min(0.42, (rms ** 0.55) * 1.9)
-
-            # Envelope: fast attack, slow release — natural jaw movement
             alpha = 0.50 if raw > self._jaw_smooth else 0.18
             self._jaw_smooth += alpha * (raw - self._jaw_smooth)
-            jaw = self._jaw_smooth
-
-            # Simple spectral split: fricative vs vowel
-            # Use only first 512 samples for speed
-            n = min(len(samples), 512)
-            fft = np.abs(np.fft.rfft(samples[:n]))
-            split = len(fft) // 3
-            low_e  = float(np.mean(fft[:split]))   if split > 0         else 0
-            high_e = float(np.mean(fft[split*2:])) if split*2 < len(fft) else 0
-            total  = max(low_e + high_e, 1e-9)
-            # high_ratio: 0=pure vowel, 1=fricative (s/f/ş)
-            high_ratio = min(1.0, (high_e / total) * 1.8)
-            vowel = 1.0 - high_ratio
-
-            self.ui.set_avatar_blendshapes({
-                # Jaw & lip opening
-                "jawOpen":              jaw,
-                "mouthLowerDownLeft":   jaw * 0.50 * vowel,
-                "mouthLowerDownRight":  jaw * 0.50 * vowel,
-                "mouthUpperUpLeft":     jaw * 0.28,
-                "mouthUpperUpRight":    jaw * 0.28,
-                # Lip shape
-                "mouthFunnel":          jaw * 0.18 * vowel,
-                "mouthShrugUpper":      jaw * 0.20,
-                "mouthShrugLower":      jaw * 0.16,
-                "mouthRollLower":       jaw * 0.12,
-                # Fricative stretch (s, f, ş)
-                "mouthStretchLeft":     jaw * 0.35 * high_ratio,
-                "mouthStretchRight":    jaw * 0.35 * high_ratio,
-                # Subtle character
-                "mouthDimpleLeft":      jaw * 0.07,
-                "mouthDimpleRight":     jaw * 0.07,
-                # Lip closure between words
-                "mouthClose":           max(0.0, 0.10 - jaw * 0.25),
-            })
         except Exception:
             pass
+
+    def _ensure_viseme_worker(self):
+        """Start the viseme worker thread if not already running."""
+        if self._viseme_running:
+            return
+        import queue
+        self._viseme_q = queue.Queue()
+        self._viseme_running = True
+        threading.Thread(target=self._viseme_worker, daemon=True).start()
+
+    def _viseme_worker(self):
+        """Single persistent thread: drains chunk queue, plays visemes without gaps."""
+        import time, queue as _q
+
+        CHANNELS = ('JawOpen','MouthClose','MouthFunnel','MouthPucker',
+                    'MouthStretchLeft','MouthStretchRight',
+                    'MouthUpperUpLeft','MouthUpperUpRight',
+                    'MouthLowerDownLeft','MouthLowerDownRight',
+                    'MouthShrugUpper','MouthRollLower',
+                    'MouthDimpleLeft','MouthDimpleRight')
+
+        current = {k: 0.0 for k in CHANNELS}
+        char_dur  = 1.0 / _CHARS_PER_SEC
+        frame_dur = 0.04  # 25fps
+        pending_chars = []  # remaining chars across chunks
+
+        while self._viseme_running:
+            # Refill from queue (non-blocking, keep going if chars left)
+            try:
+                text = self._viseme_q.get_nowait()
+                if text is None:    # sentinel → stop
+                    break
+                for c in text.lower():
+                    if c.isalpha():
+                        pending_chars.append(('char', c))
+                    elif c in (' ', ',', '.', '!', '?', ';', ':'):
+                        pending_chars.append(('pause', c))
+            except _q.Empty:
+                if not pending_chars:
+                    time.sleep(0.02)
+                    continue
+
+            if not pending_chars:
+                continue
+
+            kind, ch = pending_chars.pop(0)
+            target = dict(_WORD_PAUSE if kind == 'pause' else _VISEME.get(ch, _VISEME['_']))
+
+            amp = min(1.4, self._jaw_smooth * 2.2)
+            scaled = {k: min(1.0, v * amp) for k, v in target.items()}
+            if 'MouthClose' not in scaled:
+                scaled['MouthClose'] = max(0.0, 0.08 - scaled.get('JawOpen', 0) * 0.2)
+
+            alpha = 0.40
+            for k in CHANNELS:
+                current[k] += alpha * (scaled.get(k, 0.0) - current[k])
+
+            self.ui.set_avatar_blendshapes({
+                'jawOpen':             current['JawOpen'],
+                'mouthClose':          current['MouthClose'],
+                'mouthFunnel':         current['MouthFunnel'],
+                'mouthPucker':         current['MouthPucker'],
+                'mouthStretchLeft':    current['MouthStretchLeft'],
+                'mouthStretchRight':   current['MouthStretchRight'],
+                'mouthUpperUpLeft':    current['MouthUpperUpLeft'],
+                'mouthUpperUpRight':   current['MouthUpperUpRight'],
+                'mouthLowerDownLeft':  current['MouthLowerDownLeft'],
+                'mouthLowerDownRight': current['MouthLowerDownRight'],
+                'mouthShrugUpper':     current['MouthShrugUpper'],
+                'mouthRollLower':      current['MouthRollLower'],
+                'mouthDimpleLeft':     current['MouthDimpleLeft'],
+                'mouthDimpleRight':    current['MouthDimpleRight'],
+            })
+            time.sleep(char_dur)   # advance one character per tick
+
+        self._viseme_running = False
 
     def _dispatch_avatar(self, pcm_bytes: bytes, text: str):
         """Send audio turn to lipsync service and broadcast result to avatar UI."""
@@ -863,6 +941,7 @@ class JarvisLive:
     async def _receive_audio(self):
         print("[ATLAS] 👂 Recv started")
         out_buf, in_buf = [], []
+        self._emotion_event = asyncio.Event()
 
         try:
             while True:
@@ -882,15 +961,25 @@ class JarvisLive:
                             txt = _clean_transcript(sc.output_transcription.text)
                             if txt:
                                 out_buf.append(txt)
-                                # Real-time emotion — debounced (min 2s between changes)
-                                emo = _detect_emotion_realtime(txt)
-                                import time as _t
-                                now = _t.monotonic()
-                                if emo and emo != self._last_emotion and \
-                                        now - self._emotion_sent_at > 2.0:
+                                # First chunk → set emotion, release audio hold
+                                if not self._emotion_event.is_set():
+                                    emo = _detect_emotion(txt)
                                     self._last_emotion = emo
-                                    self._emotion_sent_at = now
                                     self.ui.set_avatar_emotion(emo)
+                                    self._emotion_event.set()
+                                else:
+                                    import time as _t
+                                    emo = _detect_emotion_realtime(txt)
+                                    now = _t.monotonic()
+                                    if emo and emo != self._last_emotion and \
+                                            now - self._emotion_sent_at > 2.5:
+                                        self._last_emotion = emo
+                                        self._emotion_sent_at = now
+                                        self.ui.set_avatar_emotion(emo)
+
+                                # Feed text to persistent viseme worker
+                                self._ensure_viseme_worker()
+                                self._viseme_q.put(txt)
 
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = _clean_transcript(sc.input_transcription.text)
@@ -911,9 +1000,15 @@ class JarvisLive:
                                 self.ui.write_log(f"Atlas: {full_out}")
                             out_buf = []
 
-                            # Close jaw, set final emotion, then return to neutral
+                            # Stop viseme worker, close jaw
+                            if self._viseme_q:
+                                self._viseme_q.put(None)  # sentinel
+                            self._viseme_running = False
                             self.ui.set_avatar_jaw(0.0)
                             self.ui.set_avatar_emotion(_detect_emotion(full_out))
+                            # Reset for next turn
+                            self._new_turn = True
+                            self._emotion_event = asyncio.Event()
                             # Fade back to neutral after 2.5s
                             def _fade_neutral():
                                 import time; time.sleep(2.5)
@@ -968,6 +1063,17 @@ class JarvisLive:
                     continue
 
                 self.set_speaking(True)
+                # First chunk: wait for emotion to be set before audio starts
+                if self._new_turn:
+                    self._new_turn = False
+                    if self._emotion_event:
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(self._emotion_event.wait()),
+                                timeout=0.65
+                            )
+                        except asyncio.TimeoutError:
+                            pass
                 await asyncio.to_thread(stream.write, chunk)
                 self._drive_mouth_from_chunk(chunk)
 
