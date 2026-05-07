@@ -9,7 +9,8 @@
 {
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.3/lib/three-vrm.module.min.js"
   }
 }
 </script>
@@ -263,7 +264,31 @@ body[data-s="MUTED"] .s-dot{animation:none;background:var(--red);box-shadow:0 0 
         <div class="s-dot" id="sDot"></div>
         <div class="s-txt" id="sTxt">INITIALISING</div>
       </div>
+      <button class="gear-btn" id="exprBtn" title="Expression tester" onclick="toggleExprPanel()">&#128515;</button>
       <button class="gear-btn" id="gearBtn" title="Avatar configuration">&#9881;</button>
+    </div>
+
+    <!-- Expression tester panel -->
+    <div id="exprPanel" style="display:none;position:absolute;top:52px;left:28px;
+      background:#010c10;border:1px solid var(--pri);padding:16px 18px;width:280px;
+      z-index:100;box-shadow:0 0 30px rgba(0,212,255,.12);">
+      <div style="font-size:9px;letter-spacing:.3em;color:var(--pri);margin-bottom:10px">◈ EXPRESSION TESTER</div>
+      <label style="font-size:8px;color:var(--dim);letter-spacing:.15em">EXPRESSION</label>
+      <select id="exprSelect" style="width:100%;height:28px;background:#000d12;border:1px solid var(--dim);
+        color:var(--text);font-family:monospace;font-size:10px;padding:0 8px;margin-bottom:8px;outline:none;">
+        <option value="">-- loading... --</option>
+      </select>
+      <label style="font-size:8px;color:var(--dim);letter-spacing:.15em">VALUE: <span id="exprValLabel">0.00</span></label>
+      <input type="range" id="exprSlider" min="0" max="1" step="0.01" value="0"
+        style="width:100%;margin:6px 0 10px;accent-color:var(--pri);">
+      <div style="display:flex;gap:6px">
+        <button onclick="resetAllExpr()" style="flex:1;height:26px;background:rgba(255,51,102,.07);
+          border:1px solid var(--red);color:var(--red);font-family:monospace;font-size:8px;
+          letter-spacing:.1em;cursor:pointer;">RESET ALL</button>
+        <button onclick="document.getElementById('exprPanel').style.display='none'"
+          style="flex:1;height:26px;background:rgba(0,212,255,.05);border:1px solid var(--dim);
+          color:var(--sec);font-family:monospace;font-size:8px;letter-spacing:.1em;cursor:pointer;">CLOSE</button>
+      </div>
     </div>
 
     <!-- Avatar config panel (absolute, inside header context for z-index) -->
@@ -478,6 +503,52 @@ function setEmotionLabel(name) {
   if (el) el.textContent = name.toUpperCase();
 }
 
+// ── Expression tester ──────────────────────────────────────────────────────
+window.toggleExprPanel = function() {
+  const p = document.getElementById('exprPanel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+};
+
+window.resetAllExpr = function() {
+  if (!renderer || !renderer._vrm) return;
+  const em = renderer._vrm.expressionManager;
+  if (!em) return;
+  for (const name of Object.keys(em.expressionMap)) {
+    em.setValue(name, 0);
+  }
+  document.getElementById('exprSlider').value = 0;
+  document.getElementById('exprValLabel').textContent = '0.00';
+};
+
+function populateExprDropdown() {
+  if (!renderer || !renderer._vrm) return;
+  const em = renderer._vrm.expressionManager;
+  if (!em) return;
+  const sel = document.getElementById('exprSelect');
+  sel.innerHTML = '';
+  for (const name of Object.keys(em.expressionMap)) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+}
+
+document.getElementById('exprSlider').addEventListener('input', (e) => {
+  const val = parseFloat(e.target.value);
+  document.getElementById('exprValLabel').textContent = val.toFixed(2);
+  const name = document.getElementById('exprSelect').value;
+  if (!name || !renderer || !renderer._vrm) return;
+  const em = renderer._vrm.expressionManager;
+  if (em) em.setValue(name, val);
+});
+
+document.getElementById('exprSelect').addEventListener('change', () => {
+  document.getElementById('exprSlider').value = 0;
+  document.getElementById('exprValLabel').textContent = '0.00';
+  window.resetAllExpr();
+});
+
 function initRenderer(avatarUrl) {
   if (renderer) {
     renderer.dispose();
@@ -512,9 +583,11 @@ async function loadModelList() {
 loadModelList();
 
 // Load saved avatar URL from localStorage
-const savedUrl = localStorage.getItem('atlas_avatar_url') || '/public/face-model-blendshapes.glb';
+const savedUrl = localStorage.getItem('atlas_avatar_url') || '/public/vroid_male.vrm';
 document.getElementById('avatarUrlIn').value = savedUrl;
 initRenderer(savedUrl);
+// Populate expression dropdown after model loads (~2s)
+setTimeout(populateExprDropdown, 2500);
 
 // Gear button toggle
 document.getElementById('gearBtn').addEventListener('click', (e) => {
@@ -535,6 +608,7 @@ document.getElementById('loadAvatarBtn').addEventListener('click', () => {
   localStorage.setItem('atlas_avatar_url', url);
   initRenderer(url);
   document.getElementById('avatarConfig').classList.remove('show');
+  setTimeout(populateExprDropdown, 2500);
 });
 
 // Load manually typed URL
@@ -544,6 +618,7 @@ document.getElementById('loadUrlBtn').addEventListener('click', () => {
   localStorage.setItem('atlas_avatar_url', url);
   initRenderer(url);
   document.getElementById('avatarConfig').classList.remove('show');
+  setTimeout(populateExprDropdown, 2500);
 });
 
 // ── Log helper ─────────────────────────────────────────────────────────────

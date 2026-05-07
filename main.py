@@ -47,7 +47,7 @@ CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 IN_CHUNK            = 1024   # mic input: 64 ms → good for VAD
-OUT_CHUNK           = 4096   # audio output: 170 ms buffer → prevents ALSA underruns
+OUT_CHUNK           = 8192   # audio output: 340 ms buffer → prevents ALSA underruns
 
 
 def _get_api_key() -> str:
@@ -76,14 +76,57 @@ def _clean_transcript(text: str) -> str:
     return text.strip()
 
 
+def _detect_emotion_realtime(chunk: str) -> str | None:
+    """Per-chunk emotion detection during speech — returns None if no clear signal."""
+    t = chunk.lower().strip()
+    if not t:
+        return None
+
+    # Punctuation-based triggers
+    if "?" in chunk:
+        return "surprised"
+    if "!" in chunk:
+        return "happy" if any(w in t for w in ["great","nice","love","wow","super","harika","mükemmel","süper"]) else "surprised"
+
+    # Keyword triggers (shorter list, high confidence only)
+    if any(w in t for w in ["sorry","unfortunately","hata","olmadı","maalesef","could not","üzgün"]):
+        return "concerned"
+    if any(w in t for w in ["great","perfect","excellent","harika","süper","amazing","wonderful","love","bravo"]):
+        return "happy"
+    if any(w in t for w in ["hmm","let me","searching","thinking","analyzing","checking","bakıyorum","arıyorum"]):
+        return "thinking"
+    if any(w in t for w in ["wow","really","seriously","incredible","inanılmaz","no way","unbelievable"]):
+        return "surprised"
+
+    return None  # no strong signal → keep current emotion
+
+
 def _detect_emotion(text: str) -> str:
     t = text.lower()
-    if any(w in t for w in ["error", "fail", "sorry", "unfortunately", "hata", "üzgün", "maalesef"]):
+    if any(w in t for w in [
+        "error", "fail", "sorry", "unfortunately", "hata", "üzgün", "maalesef",
+        "could not", "couldn't", "unable", "problem", "issue", "olmadı", "yapamadım"
+    ]):
         return "concerned"
-    if any(w in t for w in ["great", "excellent", "perfect", "done", "harika", "mükemmel"]):
+    if any(w in t for w in [
+        "great", "excellent", "perfect", "done", "harika", "mükemmel", "amazing",
+        "wonderful", "fantastic", "congrat", "tebrik", "süper", "bravo", "love"
+    ]):
         return "happy"
-    if any(w in t for w in ["searching", "looking", "let me", "arıyorum", "bakıyorum"]):
+    if any(w in t for w in [
+        "searching", "looking", "let me", "arıyorum", "bakıyorum", "thinking",
+        "analyzing", "checking", "calculating", "processing", "considering", "hmm"
+    ]):
         return "thinking"
+    if any(w in t for w in [
+        "wow", "really", "seriously", "incredible", "unbelievable", "inanılmaz",
+        "gerçekten mi", "surprising", "unexpected", "no way"
+    ]):
+        return "surprised"
+    if any(w in t for w in [
+        "listening", "tell me", "go ahead", "dinliyorum", "anlat", "yes?", "sure"
+    ]):
+        return "listening"
     return "neutral"
 
 
@@ -447,8 +490,10 @@ class JarvisLive:
         self.ui.on_tune_command = self._start_tune
         self._turn_done_event: asyncio.Event | None = None
         self._audio_buffer: list[bytes] = []
-        self._jaw_last_send = 0.0
-        self._jaw_smooth    = 0.0   # smoothed jaw value between chunks
+        self._jaw_last_send  = 0.0
+        self._jaw_smooth     = 0.0
+        self._last_emotion   = "neutral"
+        self._emotion_sent_at = 0.0   # monotonic time of last emotion broadcast
         self._noise_threshold = 0.0    # 0 = gate off
         self._calib_samples: list[float] = []
         self._calibrating = False
@@ -527,33 +572,55 @@ class JarvisLive:
         pass
 
     def _drive_mouth_from_chunk(self, pcm_bytes: bytes):
-        """RMS → smoothed jaw blendshapes. Called per played chunk (~170ms)."""
+        """Envelope follower + spectral split → 14-channel mouth animation."""
         import numpy as np
         try:
             samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            if len(samples) < 8:
+            if len(samples) < 16:
                 return
 
             rms = float(np.sqrt(np.mean(samples ** 2)))
 
-            # Square-root curve: small sounds stay small, loud ones open more
-            # Cap at 0.45 — natural speech never fully opens the jaw
-            raw = min(0.45, (rms ** 0.55) * 1.8)
+            # Square-root curve keeps small sounds small, cap at 0.42
+            raw = min(0.42, (rms ** 0.55) * 1.9)
 
-            # Smooth toward target: open fast (0.45), close slow (0.2)
-            alpha = 0.45 if raw > self._jaw_smooth else 0.20
+            # Envelope: fast attack, slow release — natural jaw movement
+            alpha = 0.50 if raw > self._jaw_smooth else 0.18
             self._jaw_smooth += alpha * (raw - self._jaw_smooth)
             jaw = self._jaw_smooth
 
+            # Simple spectral split: fricative vs vowel
+            # Use only first 512 samples for speed
+            n = min(len(samples), 512)
+            fft = np.abs(np.fft.rfft(samples[:n]))
+            split = len(fft) // 3
+            low_e  = float(np.mean(fft[:split]))   if split > 0         else 0
+            high_e = float(np.mean(fft[split*2:])) if split*2 < len(fft) else 0
+            total  = max(low_e + high_e, 1e-9)
+            # high_ratio: 0=pure vowel, 1=fricative (s/f/ş)
+            high_ratio = min(1.0, (high_e / total) * 1.8)
+            vowel = 1.0 - high_ratio
+
             self.ui.set_avatar_blendshapes({
-                "jawOpen":             jaw,
-                "mouthOpen":           jaw * 0.55,
-                "mouthFunnel":         jaw * 0.12,
-                "mouthShrugUpper":     jaw * 0.18,
-                "mouthShrugLower":     jaw * 0.14,
-                "mouthLowerDownLeft":  jaw * 0.22,
-                "mouthLowerDownRight": jaw * 0.22,
-                "mouthClose":          max(0.0, 0.08 - jaw * 0.18),
+                # Jaw & lip opening
+                "jawOpen":              jaw,
+                "mouthLowerDownLeft":   jaw * 0.50 * vowel,
+                "mouthLowerDownRight":  jaw * 0.50 * vowel,
+                "mouthUpperUpLeft":     jaw * 0.28,
+                "mouthUpperUpRight":    jaw * 0.28,
+                # Lip shape
+                "mouthFunnel":          jaw * 0.18 * vowel,
+                "mouthShrugUpper":      jaw * 0.20,
+                "mouthShrugLower":      jaw * 0.16,
+                "mouthRollLower":       jaw * 0.12,
+                # Fricative stretch (s, f, ş)
+                "mouthStretchLeft":     jaw * 0.35 * high_ratio,
+                "mouthStretchRight":    jaw * 0.35 * high_ratio,
+                # Subtle character
+                "mouthDimpleLeft":      jaw * 0.07,
+                "mouthDimpleRight":     jaw * 0.07,
+                # Lip closure between words
+                "mouthClose":           max(0.0, 0.10 - jaw * 0.25),
             })
         except Exception:
             pass
@@ -604,7 +671,6 @@ class JarvisLive:
             input_audio_transcription=types.AudioTranscriptionConfig(),
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": TOOL_DECLARATIONS}],
-            session_resumption=types.SessionResumptionConfig(),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -816,6 +882,15 @@ class JarvisLive:
                             txt = _clean_transcript(sc.output_transcription.text)
                             if txt:
                                 out_buf.append(txt)
+                                # Real-time emotion — debounced (min 2s between changes)
+                                emo = _detect_emotion_realtime(txt)
+                                import time as _t
+                                now = _t.monotonic()
+                                if emo and emo != self._last_emotion and \
+                                        now - self._emotion_sent_at > 2.0:
+                                    self._last_emotion = emo
+                                    self._emotion_sent_at = now
+                                    self.ui.set_avatar_emotion(emo)
 
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = _clean_transcript(sc.input_transcription.text)
@@ -836,9 +911,14 @@ class JarvisLive:
                                 self.ui.write_log(f"Atlas: {full_out}")
                             out_buf = []
 
-                            # Close jaw and send emotion
+                            # Close jaw, set final emotion, then return to neutral
                             self.ui.set_avatar_jaw(0.0)
                             self.ui.set_avatar_emotion(_detect_emotion(full_out))
+                            # Fade back to neutral after 2.5s
+                            def _fade_neutral():
+                                import time; time.sleep(2.5)
+                                self.ui.set_avatar_emotion("neutral")
+                            threading.Thread(target=_fade_neutral, daemon=True).start()
 
                             self._audio_buffer = []
 

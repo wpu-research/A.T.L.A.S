@@ -149,7 +149,7 @@ class AtlasUI:
                     models = []
                     if PUBLIC_DIR.exists():
                         models = [f.name for f in sorted(PUBLIC_DIR.iterdir())
-                                  if f.suffix.lower() in (".glb", ".gltf")]
+                                  if f.suffix.lower() in (".glb", ".gltf", ".vrm")]
                     body = json.dumps(models).encode()
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")

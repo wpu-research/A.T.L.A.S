@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
 // ── Emotion presets ──────────────────────────────────────────────────────────
 const EMOTIONS = {
@@ -130,6 +131,9 @@ class AvatarRenderer {
     // Camera base Z (set by _frameModel, used by zoom)
     this._baseCamZ = 2.4;
 
+    // Current emotion target for smooth VRM lerp
+    this._emotionTarget = 'neutral';
+
     // Persistent user rotation (mouse drag accumulates here, doesn't snap back)
     this._userRotY = 0;
 
@@ -213,35 +217,61 @@ class AvatarRenderer {
     this.targetBS = {};
 
     this._showLoading(true);
+    this._vrm = null;
 
     const loader = new GLTFLoader();
+    loader.register(parser => new VRMLoaderPlugin(parser));
+
     loader.load(
       finalUrl,
       (gltf) => {
-        const model = gltf.scene;
+        const vrm = gltf.userData.vrm;
 
-        // Avaturn GLBs are exported feet-at-Y:0 — no centering needed.
-        // Set PBR env intensity per mesh so skin/hair responds correctly.
-        model.traverse((node) => {
-          if (node.isMesh) {
-            node.castShadow = true;
-            if (node.material) node.material.envMapIntensity = 0.4;
-          }
-        });
+        if (vrm) {
+          // ── VRM model ──────────────────────────────────────────────────────
+          VRMUtils.removeUnnecessaryJoints(gltf.scene);
+          this._vrm = vrm;
+          const model = vrm.scene;
 
-        this._modelGroup.add(model);
-        this._setupMorphTargets();
-        this._findHeadBone(model);
-        this._findJawBone(model);
-        this._initBodyAnims(model);
-        this._frameModel(model);
-        this._showLoading(false);
+          model.traverse((node) => {
+            if (node.isMesh) {
+              node.castShadow = true;
+              node.frustumCulled = false;
+              if (node.material) node.material.envMapIntensity = 0.3;
+            }
+          });
+
+          model.visible = false;
+          this._modelGroup.add(model);
+          this._setupVRMPose(vrm);
+          this._frameVRMBust(model);   // portrait crop: shoulders up
+          this._setVRMEmotion('neutral');
+          requestAnimationFrame(() => { model.visible = true; });
+          this._showLoading(false);
+          const allExpr = Object.keys(vrm.expressionManager?.expressionMap ?? {});
+          console.log('[Avatar] VRM loaded — ALL expressions:', allExpr);
+        } else {
+          // ── GLB model (legacy) ─────────────────────────────────────────────
+          const model = gltf.scene;
+          model.traverse((node) => {
+            if (node.isMesh) {
+              node.castShadow = true;
+              if (node.material) node.material.envMapIntensity = 0.4;
+            }
+          });
+
+          this._modelGroup.add(model);
+          this._setupMorphTargets();
+          this._findHeadBone(model);
+          this._findJawBone(model);
+          this._initBodyAnims(model);
+          this._frameModel(model);
+          this._showLoading(false);
+        }
       },
-      (progress) => {
-        // progress.loaded / progress.total
-      },
+      () => {},
       (err) => {
-        console.error('[AvatarRenderer] GLB load error:', err);
+        console.error('[AvatarRenderer] load error:', err);
         if (this._loadingLabel) {
           this._loadingLabel.textContent = 'AVATAR LOAD FAILED';
           this._loadingLabel.style.color = '#ff3355';
@@ -340,6 +370,41 @@ class AvatarRenderer {
     if (!this._jawBone) {
       console.log('[Avatar] No jaw bone found — jaw animation disabled');
     }
+  }
+
+  // ── Bust/portrait frame — shoulders to top of head ─────────────────────────
+  _frameVRMBust(model) {
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const H = size.y;
+
+    // Center model, face toward camera (VRM default faces +Z, camera is at +Z)
+    this._modelGroup.position.set(
+      -(box.min.x + size.x / 2),
+      -box.min.y,
+      -(box.min.z + size.z / 2)
+    );
+    this._userRotY = Math.PI;  // face toward camera from first frame
+
+    // Bust region: shoulders (~78% H) to crown (100% H)
+    const shoulderY = H * 0.78;
+    const crownY    = H * 1.00;
+    const bustH     = crownY - shoulderY;           // ~0.22 × H
+    const targetY   = shoulderY + bustH * 0.45;     // slightly below neck center
+
+    const fovRad = (this._camera.fov * Math.PI) / 180;
+    const dist   = (bustH * 1.7) / (2 * Math.tan(fovRad / 2)); // zoomed out
+
+    this._camera.near = dist * 0.01;
+    this._camera.far  = dist * 20;
+    this._baseCamZ    = dist;
+
+    this._camera.position.set(0, targetY, dist);
+    this._camera.lookAt(0, targetY, 0);
+    this._camera.updateProjectionMatrix();
+
+    console.log('[Avatar] Bust frame — H:', H.toFixed(2),
+      'targetY:', targetY.toFixed(2), 'dist:', dist.toFixed(2));
   }
 
   // ── Auto-frame model to camera ─────────────────────────────────────────────
@@ -486,11 +551,26 @@ class AvatarRenderer {
 
   // ── Blendshape control ──────────────────────────────────────────────────────
   setBlendshapes(values) {
+    if (this._vrm) {
+      const em = this._vrm.expressionManager;
+      if (!em) return;
+
+      // Direct ARKit → VRM PascalCase mapping (model has all 52 clips)
+      // Blog note: JawOpen and MouthClose must be set together
+      const jaw = values.jawOpen ?? 0;
+      for (const [name, value] of Object.entries(values)) {
+        const vrmName = name.charAt(0).toUpperCase() + name.slice(1);
+        em.setValue(vrmName, Math.min(1, Math.max(0, value)));
+      }
+      // MouthClose balances JawOpen to prevent broken-looking mouth
+      em.setValue('MouthClose', Math.min(1, jaw * 0.15));
+      return;
+    }
+    // GLB morph target path
     for (const [name, value] of Object.entries(values)) {
       this.targetBS[name] = value;
       if (!(name in this.currentBS)) this.currentBS[name] = 0;
     }
-    // Jaw bone fallback for models without morph targets
     if (this._jawBone && 'jawOpen' in values) {
       this._jawTarget = values.jawOpen;
     }
@@ -498,20 +578,110 @@ class AvatarRenderer {
 
   // ── Emotion control ─────────────────────────────────────────────────────────
   setEmotion(name) {
+    if (this._vrm) {
+      this._setVRMEmotion(name);
+      return;
+    }
+    // GLB morph target path
     const preset = EMOTIONS[name] || EMOTIONS.neutral;
-
-    // Reset all emotion channels that are NOT lipsync (or if not speaking)
     for (const ch of EMOTION_CHANNELS) {
-      if (!this._isSpeaking || !LIPSYNC_CHANNELS.has(ch)) {
-        this.targetBS[ch] = 0;
-      }
+      if (!this._isSpeaking || !LIPSYNC_CHANNELS.has(ch)) this.targetBS[ch] = 0;
+    }
+    for (const [ch, val] of Object.entries(preset)) {
+      if (!this._isSpeaking || !LIPSYNC_CHANNELS.has(ch)) this.targetBS[ch] = val;
+    }
+  }
+
+  _setVRMEmotion(name) {
+    // Store target — applied gradually in render loop to avoid snapping
+    this._emotionTarget = name;
+  }
+
+  _applyVRMEmotion(em, name, speaking) {
+    // Channels owned by lipsync — never touch during speech
+    const LIPSYNC_OWNED = new Set([
+      'JawOpen','MouthClose','MouthFunnel','MouthPucker',
+      'MouthShrugUpper','MouthShrugLower','MouthLowerDownLeft','MouthLowerDownRight',
+      'MouthUpperUpLeft','MouthUpperUpRight','MouthStretchLeft','MouthStretchRight',
+      'MouthRollLower','MouthRollUpper','MouthLeft','MouthRight',
+      'aa','oh','ou','ih','ee',
+    ]);
+
+    // Channels we control for emotion (upper face only during speech)
+    const ALL_EMOTION = [
+      'happy','angry','sad','relaxed','Surprised','neutral',
+      'BrowInnerUp','BrowDownLeft','BrowDownRight',
+      'BrowOuterUpLeft','BrowOuterUpRight',
+      'EyeWideLeft','EyeWideRight','EyeSquintLeft','EyeSquintRight',
+      'CheekSquintLeft','CheekSquintRight',
+      // mouth only when NOT speaking
+      'MouthSmileLeft','MouthSmileRight',
+      'MouthFrownLeft','MouthFrownRight',
+    ];
+
+    // Build target values
+    const targets = {};
+    for (const k of ALL_EMOTION) targets[k] = 0;
+
+    switch (name) {
+      case 'happy':
+        targets['BrowInnerUp']      = 0.15;
+        targets['BrowOuterUpLeft']  = 0.1;
+        targets['BrowOuterUpRight'] = 0.1;
+        targets['CheekSquintLeft']  = 0.35;
+        targets['CheekSquintRight'] = 0.35;
+        if (!speaking) {
+          targets['happy']           = 0.6;
+          targets['MouthSmileLeft']  = 0.45;
+          targets['MouthSmileRight'] = 0.45;
+        }
+        break;
+      case 'thinking':
+        targets['BrowInnerUp']    = 0.45;
+        targets['BrowDownLeft']   = 0.25;
+        targets['EyeSquintLeft']  = 0.2;
+        targets['EyeSquintRight'] = 0.1;
+        break;
+      case 'concerned':
+        targets['sad']           = 0.35;
+        targets['BrowInnerUp']   = 0.4;
+        targets['BrowDownLeft']  = 0.3;
+        targets['BrowDownRight'] = 0.2;
+        if (!speaking) {
+          targets['MouthFrownLeft']  = 0.2;
+          targets['MouthFrownRight'] = 0.2;
+        }
+        break;
+      case 'surprised':
+        targets['Surprised']         = 0.6;
+        targets['EyeWideLeft']       = 0.6;
+        targets['EyeWideRight']      = 0.6;
+        targets['BrowOuterUpLeft']   = 0.5;
+        targets['BrowOuterUpRight']  = 0.5;
+        targets['BrowInnerUp']       = 0.55;
+        break;
+      case 'listening':
+        targets['relaxed']           = 0.25;
+        targets['BrowInnerUp']       = 0.08;
+        break;
+      case 'angry':
+        targets['angry']           = 0.5;
+        targets['BrowDownLeft']    = 0.55;
+        targets['BrowDownRight']   = 0.55;
+        targets['EyeSquintLeft']   = 0.3;
+        targets['EyeSquintRight']  = 0.3;
+        break;
+      default:
+        targets['neutral'] = 0.05;
+        break;
     }
 
-    // Apply preset values
-    for (const [ch, val] of Object.entries(preset)) {
-      if (!this._isSpeaking || !LIPSYNC_CHANNELS.has(ch)) {
-        this.targetBS[ch] = val;
-      }
+    // Smooth lerp toward targets (skip lipsync-owned channels during speech)
+    const speed = 0.12;
+    for (const [k, target] of Object.entries(targets)) {
+      if (speaking && LIPSYNC_OWNED.has(k)) continue;
+      const cur = em.getValue(k) ?? 0;
+      em.setValue(k, cur + (target - cur) * speed);
     }
   }
 
@@ -530,28 +700,82 @@ class AvatarRenderer {
     if (this._blinkPhase === 'closing') {
       this._blinkT += dt / this._blinkDur;
       const v = Math.min(1, this._blinkT);
-      this.targetBS['eyeBlinkLeft'] = v;
-      this.targetBS['eyeBlinkRight'] = v;
-      if (this._blinkT >= 1) {
-        this._blinkPhase = 'opening';
-        this._blinkT = 0;
-      }
+      this._setBlink(v);
+      if (this._blinkT >= 1) { this._blinkPhase = 'opening'; this._blinkT = 0; }
     } else if (this._blinkPhase === 'opening') {
       this._blinkT += dt / this._blinkDur;
       const v = Math.max(0, 1 - this._blinkT);
-      this.targetBS['eyeBlinkLeft'] = v;
-      this.targetBS['eyeBlinkRight'] = v;
+      this._setBlink(v);
       if (this._blinkT >= 1) {
-        this.targetBS['eyeBlinkLeft'] = 0;
-        this.targetBS['eyeBlinkRight'] = 0;
+        this._setBlink(0);
         this._blinkPhase = 'idle';
         this._blinkTimer = this._nextBlinkDelay();
       }
     }
   }
 
+  // ── VRM pose & idle ─────────────────────────────────────────────────────────
+  _setupVRMPose(vrm) {
+    const h = vrm.humanoid;
+    if (!h) return;
+
+    // Normalized bones persist through vrm.update() — correct API for poses
+    const set = (name, x = 0, y = 0, z = 0) => {
+      const bone = h.getNormalizedBoneNode(name);
+      if (bone) bone.rotation.set(x, y, z);
+    };
+
+    set('leftUpperArm',  0, 0,  1.15);
+    set('rightUpperArm', 0, 0, -1.15);
+    set('leftLowerArm',  0, 0,  0.15);
+    set('rightLowerArm', 0, 0, -0.15);
+    set('leftHand',      0, 0,  0.1);
+    set('rightHand',     0, 0, -0.1);
+    set('chest',        -0.04, 0, 0);
+    set('spine',         0.02, 0, 0);
+
+    // Apply pose immediately so model reveals without T-pose
+    vrm.update(0);
+
+    // Cache normalized bone refs for idle animation
+    this._vrmBones = {};
+    for (const name of ['spine','chest','neck','head','leftUpperArm','rightUpperArm']) {
+      this._vrmBones[name] = h.getNormalizedBoneNode(name);
+    }
+  }
+
+  _updateVRMIdle(vrm, elapsed) {
+    const b = this._vrmBones;
+    if (!b) return;
+
+    const breath  = Math.sin(elapsed * 1.55) * 0.06;
+    const headY   = Math.sin(elapsed * 0.35) * 0.08;
+    const headX   = Math.sin(elapsed * 0.50) * 0.04;
+    const armSway = Math.sin(elapsed * 0.40) * 0.04;
+
+    if (b.chest) b.chest.rotation.x = -0.04 + breath;
+    if (b.spine) b.spine.rotation.x =  0.02 - breath * 0.4;
+    if (b.head)  { b.head.rotation.y = headY; b.head.rotation.x = headX; }
+    if (b.neck)  b.neck.rotation.y = headY * 0.4;
+    if (b.leftUpperArm)  b.leftUpperArm.rotation.z  =  1.15 + armSway;
+    if (b.rightUpperArm) b.rightUpperArm.rotation.z = -1.15 - armSway;
+  }
+
+  _setBlink(v) {
+    if (this._vrm) {
+      const em = this._vrm.expressionManager;
+      if (!em) return;
+      // Try 'blink' first, fall back to separate left/right
+      em.setValue('EyeBlinkLeft', v);
+      em.setValue('EyeBlinkRight', v);
+    } else {
+      this.targetBS['eyeBlinkLeft']  = v;
+      this.targetBS['eyeBlinkRight'] = v;
+    }
+  }
+
   _nextBlinkDelay() {
-    return 3 + Math.random() * 3; // 3–6 seconds
+    return 3 + Math.random() * 3;
   }
 
   // ── Render loop ─────────────────────────────────────────────────────────────
@@ -563,6 +787,14 @@ class AvatarRenderer {
     const elapsed = this._clock.elapsedTime;
 
     if (this._mixer) this._mixer.update(this._animClock.getDelta());
+    if (this._vrm) {
+      this._updateVRMIdle(this._vrm, elapsed);
+      const em = this._vrm.expressionManager;
+      if (em && this._emotionTarget) {
+        this._applyVRMEmotion(em, this._emotionTarget, this._isSpeaking);
+      }
+      this._vrm.update(dt);
+    }
 
     this._updateIdle(dt, elapsed);
 
