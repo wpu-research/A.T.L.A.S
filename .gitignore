@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+config/api_keys.json
+memory/long_term.json
+*.log
+.env
+
+# Oversized models (>100MB)
+public/human.glb
+
+# Cache / temp
+tmp/
+lipsync/audio2lipsync/python/src/checkpoints/
