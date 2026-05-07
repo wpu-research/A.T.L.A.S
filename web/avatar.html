@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.T.L.A.S — Avatar</title>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --pri:#00d4ff;--sec:#007a99;--acc:#ff8c00;--acc2:#ffcc00;
+  --bg:#020c12;--panel:#010a0e;--text:#8ffcff;--dim:#003344;
+  --green:#00ff88;--red:#ff3355;--muted-c:#ff3366;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Courier New',monospace;user-select:none}
+
+/* ── Blueprint grid ── */
+.bg-grid{
+  position:fixed;inset:0;
+  background-image:linear-gradient(rgba(0,212,255,.025) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(0,212,255,.025) 1px,transparent 1px);
+  background-size:44px 44px;pointer-events:none;z-index:0;
+}
+
+/* ── Scattered tech text ── */
+.bg-text{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+.bg-text span{position:absolute;font-size:8px;color:var(--pri);white-space:nowrap;opacity:.06}
+
+/* ── Layout ── */
+.layout{position:relative;z-index:1;height:100vh;display:flex;flex-direction:column}
+
+/* ── Header ── */
+header{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 28px;border-bottom:1px solid rgba(0,212,255,.1);flex-shrink:0;
+  gap:12px;
+}
+.logo-wrap .logo{
+  font-size:21px;font-weight:bold;letter-spacing:.45em;color:var(--pri);
+  text-shadow:0 0 18px var(--pri),0 0 40px rgba(0,212,255,.25);
+}
+.logo-wrap .sub{font-size:8px;letter-spacing:.25em;color:var(--sec);margin-top:2px}
+.header-right{display:flex;align-items:center;gap:10px}
+.status-badge{
+  display:flex;align-items:center;gap:8px;padding:6px 16px;
+  border:1px solid rgba(0,212,255,.4);background:rgba(0,212,255,.04);
+}
+.s-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1.2s ease-in-out infinite}
+.s-txt{font-size:10px;letter-spacing:.2em;color:var(--pri)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ── Gear button ── */
+.gear-btn{
+  background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.25);
+  color:var(--sec);font-size:14px;width:30px;height:30px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .2s;flex-shrink:0;
+}
+.gear-btn:hover{border-color:var(--pri);color:var(--pri);background:rgba(0,212,255,.1)}
+
+/* ── Avatar config panel ── */
+.avatar-config{
+  display:none;position:absolute;top:52px;right:28px;
+  background:#010c10;border:1px solid var(--pri);padding:18px 20px;
+  width:340px;z-index:100;box-shadow:0 0 40px rgba(0,212,255,.12);
+}
+.avatar-config.show{display:block}
+.avatar-config h3{font-size:9px;letter-spacing:.3em;color:var(--pri);margin-bottom:12px}
+.avatar-config label{display:block;font-size:8px;color:var(--dim);letter-spacing:.15em;margin-bottom:5px}
+.avatar-config input{
+  width:100%;height:28px;background:#000d12;border:1px solid var(--dim);color:var(--text);
+  font-family:monospace;font-size:9px;padding:0 8px;outline:none;margin-bottom:10px;
+}
+.avatar-config input:focus{border-color:var(--pri)}
+.avatar-config .load-btn{
+  width:100%;height:28px;background:rgba(0,212,255,.07);border:1px solid var(--pri);
+  color:var(--pri);font-family:monospace;font-size:9px;letter-spacing:.15em;cursor:pointer;
+  transition:all .2s;
+}
+.avatar-config .load-btn:hover{background:var(--pri);color:#000}
+.avatar-config .hint{font-size:7.5px;color:var(--dim);margin-top:8px;line-height:1.6;letter-spacing:.05em}
+
+/* ── Main content area ── */
+.content{flex:1;display:flex;min-height:0;overflow:hidden}
+
+/* ── Avatar column ── */
+.avatar-col{
+  flex:6;position:relative;overflow:hidden;
+  border-right:1px solid rgba(0,212,255,.08);
+}
+#avatarCanvas{
+  display:block;width:100%;height:100%;
+}
+
+/* ── HUD overlays on avatar ── */
+.hud-tl{
+  position:absolute;top:14px;left:14px;
+  font-size:8px;letter-spacing:.15em;color:var(--pri);
+  line-height:2;pointer-events:none;
+}
+.hud-tl .hud-line{
+  display:flex;align-items:center;gap:6px;
+  background:rgba(2,12,18,.72);border:1px solid rgba(0,212,255,.15);
+  padding:3px 8px;backdrop-filter:blur(4px);
+}
+.hud-dot{width:5px;height:5px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 5px var(--green);animation:blink 1.2s ease-in-out infinite}
+.hud-dot.fps{background:var(--acc2);box-shadow:0 0 5px var(--acc2);animation:none}
+
+.hud-bl{
+  position:absolute;bottom:14px;left:14px;
+  font-size:8px;letter-spacing:.15em;color:var(--acc);
+  pointer-events:none;
+}
+.hud-bl .hud-emotion{
+  background:rgba(2,12,18,.72);border:1px solid rgba(255,140,0,.2);
+  padding:3px 10px;backdrop-filter:blur(4px);
+}
+
+/* Corner decorators */
+.corner{position:absolute;width:18px;height:18px;pointer-events:none}
+.corner-tl{top:6px;left:6px;border-top:1px solid rgba(0,212,255,.35);border-left:1px solid rgba(0,212,255,.35)}
+.corner-tr{top:6px;right:6px;border-top:1px solid rgba(0,212,255,.35);border-right:1px solid rgba(0,212,255,.35)}
+.corner-bl{bottom:6px;left:6px;border-bottom:1px solid rgba(0,212,255,.35);border-left:1px solid rgba(0,212,255,.35)}
+.corner-br{bottom:6px;right:6px;border-bottom:1px solid rgba(0,212,255,.35);border-right:1px solid rgba(0,212,255,.35)}
+
+/* No-avatar placeholder */
+.no-avatar{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;
+  font-size:9px;letter-spacing:.2em;color:var(--sec);
+  pointer-events:none;
+}
+.no-avatar .na-icon{font-size:40px;opacity:.15}
+.no-avatar .na-text{text-align:center;line-height:2}
+
+/* ── Chat log column ── */
+.chat-col{
+  flex:4;display:flex;flex-direction:column;
+  background:rgba(1,10,14,.5);min-height:0;
+}
+.chat-col-header{
+  padding:12px 16px 8px;border-bottom:1px solid rgba(0,212,255,.08);
+  font-size:8px;letter-spacing:.2em;color:var(--sec);flex-shrink:0;
+}
+.log-panel{
+  flex:1;overflow-y:auto;padding:10px 14px;font-size:10px;line-height:1.85;
+  scrollbar-width:thin;scrollbar-color:var(--dim) transparent;
+  min-height:0;
+}
+.ly{color:#cce8ff}.la{color:var(--pri)}.ls{color:var(--acc2)}.le{color:var(--red)}
+
+/* ── Bottom bar ── */
+.bottom{
+  flex-shrink:0;padding:10px 18px 12px;
+  border-top:1px solid rgba(0,212,255,.1);
+  display:flex;flex-direction:column;gap:7px;z-index:1;
+  background:rgba(2,12,18,.9);
+}
+.input-row{display:flex;gap:7px;align-items:center}
+.mute-btn{
+  height:30px;padding:0 14px;background:rgba(0,212,255,.04);border:1px solid var(--sec);
+  color:var(--green);font-family:monospace;font-size:9px;letter-spacing:.1em;cursor:pointer;
+  white-space:nowrap;transition:all .2s;
+}
+.mute-btn:hover{border-color:var(--pri);background:rgba(0,212,255,.1)}
+.mute-btn.on{color:var(--red);border-color:var(--red);background:rgba(255,51,102,.07)}
+.txt-in{
+  flex:1;height:30px;background:#000d12;border:1px solid var(--dim);color:var(--text);
+  font-family:monospace;font-size:10px;padding:0 11px;outline:none;transition:border-color .2s;
+}
+.txt-in:focus{border-color:var(--pri)}
+.send-btn{
+  height:30px;padding:0 16px;background:rgba(0,212,255,.07);border:1px solid var(--pri);
+  color:var(--pri);font-family:monospace;font-size:9px;letter-spacing:.12em;cursor:pointer;transition:all .2s;
+}
+.send-btn:hover{background:var(--pri);color:#000}
+.bottom-links{
+  display:flex;align-items:center;justify-content:flex-start;
+  font-size:8px;color:var(--dim);letter-spacing:.12em;
+}
+.bottom-links a{color:var(--sec);text-decoration:none;transition:color .2s}
+.bottom-links a:hover{color:var(--pri)}
+
+/* ── Setup overlay ── */
+.setup{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:200;
+  align-items:center;justify-content:center;backdrop-filter:blur(5px);
+}
+.setup.show{display:flex}
+.setup-box{
+  background:#010c10;border:1px solid var(--pri);padding:34px 38px;min-width:360px;
+  box-shadow:0 0 60px rgba(0,212,255,.15);
+}
+.setup-box h2{font-size:13px;letter-spacing:.3em;color:var(--pri);margin-bottom:4px}
+.setup-box p{font-size:8px;color:var(--sec);letter-spacing:.2em;margin-bottom:22px}
+.setup-box label{display:block;font-size:8px;color:var(--dim);letter-spacing:.18em;margin-bottom:5px}
+.setup-box input{
+  width:100%;height:32px;background:#000d12;border:1px solid var(--dim);color:var(--text);
+  font-family:monospace;font-size:10px;padding:0 11px;outline:none;margin-bottom:16px;
+}
+.setup-box input:focus{border-color:var(--pri)}
+.os-row{display:flex;gap:7px;margin-bottom:22px}
+.os-btn{
+  flex:1;height:28px;background:transparent;border:1px solid var(--dim);color:var(--sec);
+  font-family:monospace;font-size:8px;letter-spacing:.12em;cursor:pointer;transition:all .2s;
+}
+.os-btn.sel{border-color:var(--pri);color:var(--pri);background:rgba(0,212,255,.07)}
+.go-btn{
+  width:100%;height:34px;background:rgba(0,212,255,.09);border:1px solid var(--pri);
+  color:var(--pri);font-family:monospace;font-size:10px;letter-spacing:.2em;cursor:pointer;transition:all .2s;
+}
+.go-btn:hover{background:var(--pri);color:#000}
+.setup-link{display:block;text-align:center;margin-top:11px;font-size:8px;color:var(--dim)}
+.setup-link a{color:var(--sec);text-decoration:none}
+.setup-link a:hover{color:var(--pri)}
+
+/* ── State colours on muted ── */
+body[data-s="MUTED"] .s-dot{animation:none;background:var(--red);box-shadow:0 0 8px var(--red)}
+</style>
+</head>
+<body data-s="INITIALISING">
+
+<div class="bg-grid"></div>
+<div class="bg-text" id="bgText"></div>
+
+<!-- Setup overlay -->
+<div class="setup show" id="setup">
+  <div class="setup-box">
+    <h2>◈ INITIALISATION REQUIRED</h2>
+    <p>Configure A.T.L.A.S before first boot.</p>
+    <label>GEMINI API KEY</label>
+    <input type="password" id="keyIn" placeholder="Enter your Gemini API key...">
+    <label>OPERATING SYSTEM</label>
+    <div class="os-row">
+      <button class="os-btn" data-os="windows" onclick="selOS(this)">WINDOWS</button>
+      <button class="os-btn" data-os="mac" onclick="selOS(this)">macOS</button>
+      <button class="os-btn sel" data-os="linux" onclick="selOS(this)">LINUX</button>
+    </div>
+    <button class="go-btn" onclick="doSetup()">INITIALISE A.T.L.A.S</button>
+    <span class="setup-link">Free key → <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a></span>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- Header -->
+  <header>
+    <div class="logo-wrap">
+      <div class="logo">A.T.L.A.S</div>
+      <div class="sub">AVATAR INTERFACE v2.0</div>
+    </div>
+    <div class="header-right">
+      <div class="status-badge">
+        <div class="s-dot" id="sDot"></div>
+        <div class="s-txt" id="sTxt">INITIALISING</div>
+      </div>
+      <button class="gear-btn" id="gearBtn" title="Avatar configuration">&#9881;</button>
+    </div>
+
+    <!-- Avatar config panel (absolute, inside header context for z-index) -->
+    <div class="avatar-config" id="avatarConfig">
+      <h3>&#9881; AVATAR CONFIGURATION</h3>
+      <label>LOCAL MODELS</label>
+      <select id="modelSelect" style="width:100%;height:28px;background:#000d12;border:1px solid var(--dim);color:var(--text);font-family:monospace;font-size:10px;padding:0 8px;margin-bottom:8px;outline:none;cursor:pointer;">
+        <option value="">-- select model --</option>
+      </select>
+      <button class="load-btn" id="loadAvatarBtn" style="width:100%;margin-bottom:10px">LOAD SELECTED</button>
+      <label style="margin-top:4px">OR PASTE URL / PATH</label>
+      <input type="text" id="avatarUrlIn" placeholder="/public/my_avatar.glb">
+      <button class="load-btn" id="loadUrlBtn">LOAD URL</button>
+      <div class="hint">
+        Place .glb files in the <strong>public/</strong> folder and they appear above automatically.
+      </div>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <div class="content">
+
+    <!-- 3D Avatar column -->
+    <div class="avatar-col" id="avatarCol">
+      <canvas id="avatarCanvas"></canvas>
+
+      <!-- No-avatar placeholder -->
+      <div class="no-avatar" id="noAvatarMsg">
+        <div class="na-icon">◈</div>
+        <div class="na-text">
+          NEURAL AVATAR OFFLINE<br>
+          Enter your Avaturn GLB URL<br>
+          via the &#9881; gear icon above
+        </div>
+      </div>
+
+      <!-- HUD overlays -->
+      <div class="hud-tl">
+        <div class="hud-line"><span class="hud-dot"></span>NEURAL LINK &bull; ACTIVE</div>
+        <div class="hud-line" style="margin-top:3px"><span class="hud-dot fps"></span>LIPSYNC &bull; 60fps</div>
+      </div>
+
+      <div class="hud-bl">
+        <div class="hud-emotion">EMOTION &bull; <span id="emotionLabel">NEUTRAL</span></div>
+      </div>
+
+      <!-- Blueprint corner decorators -->
+      <div class="corner corner-tl"></div>
+      <div class="corner corner-tr"></div>
+      <div class="corner corner-bl"></div>
+      <div class="corner corner-br"></div>
+    </div>
+
+    <!-- Chat log column -->
+    <div class="chat-col">
+      <div class="chat-col-header">◈ COMM LOG</div>
+      <div class="log-panel" id="log"></div>
+    </div>
+
+  </div>
+
+  <!-- Bottom bar -->
+  <div class="bottom">
+    <div class="input-row">
+      <button class="mute-btn" id="muteBtn" onclick="toggleMute()">&#127897; LIVE</button>
+      <button class="mute-btn" id="tuneBtn" onclick="startTune()" title="Ortam gürültüsünü kalibre et">&#9210; TUNE</button>
+      <input class="txt-in" id="txtIn" type="text" placeholder="Enter command..."
+             onkeydown="if(event.key==='Enter')send()">
+      <button class="send-btn" onclick="send()">SEND &#9656;</button>
+    </div>
+    <div class="bottom-links">
+      <a href="atlas.html">&#8592; Classic UI</a>
+    </div>
+  </div>
+</div>
+
+<!-- Non-module scripts for setup/state functions called inline via onclick -->
+<script>
+// ── Background scattered text ──────────────────────────────────────────────
+const td=['SYS.INIT 0xA3F7','NEURAL.LINK OK','BOOT.SEQ','MEM.MAP 0xFF',
+  'Cu','At','No','Ta','Fe','Si','Au','Pb','01001010','11000101','10110011',
+  'PROC.CORE','NET.PING 12ms','CACHE 98%','v4.7.2','ATLAS.SYS','GEN.AI'];
+const bg=document.getElementById('bgText');
+for(let i=0;i<45;i++){
+  const s=document.createElement('span');
+  s.textContent=td[i%td.length];
+  s.style.left=Math.random()*100+'%';
+  s.style.top=Math.random()*100+'%';
+  s.style.opacity=(Math.random()*.06+.03).toFixed(2);
+  bg.appendChild(s);
+}
+
+// ── State colours ──────────────────────────────────────────────────────────
+const stateColors={
+  LISTENING:'#00ff88',SPEAKING:'#00ff88',THINKING:'#ff8c00',
+  MUTED:'#ff3355',INITIALISING:'#006688',PROCESSING:'#ff8c00',ONLINE:'#00ff88'
+};
+
+function setState(s){
+  document.body.dataset.s=s;
+  document.getElementById('sTxt').textContent=s;
+  const c=stateColors[s]||'#00d4ff';
+  const dot=document.getElementById('sDot');
+  dot.style.background=c;
+  dot.style.boxShadow=`0 0 10px ${c}`;
+}
+
+// ── Setup overlay ──────────────────────────────────────────────────────────
+let chosenOS='linux';
+function selOS(btn){
+  document.querySelectorAll('.os-btn').forEach(b=>b.classList.remove('sel'));
+  btn.classList.add('sel');
+  chosenOS=btn.dataset.os;
+}
+// ── Tune / noise gate ─────────────────────────────────────────────────────
+let _tuneTimer = null;
+function startTune() {
+  if (!window._ws || window._ws.readyState !== 1) return;
+  window._ws.send(JSON.stringify({type: 'tune'}));
+}
+function _handleTune(m) {
+  const btn = document.getElementById('tuneBtn');
+  if (m.status === 'started') {
+    btn.textContent = '⏺ 2s...';
+    btn.style.color = 'var(--acc)';
+    btn.style.borderColor = 'var(--acc)';
+    addLog('ls', 'SYS: Kalibrasyon — 2 sn sessiz kal...');
+  } else if (m.status === 'progress') {
+    btn.textContent = m.value > 0 ? `⏺ ${m.value}s...` : '⏺ 0s...';
+  } else if (m.status === 'done') {
+    const db = (20 * Math.log10(m.value + 1e-9)).toFixed(1);
+    btn.textContent = `✓ ${db}dB`;
+    btn.style.color = 'var(--green)';
+    btn.style.borderColor = 'var(--green)';
+    setTimeout(() => {
+      btn.textContent = '⊙ TUNE';
+      btn.style.color = '';
+      btn.style.borderColor = '';
+    }, 3000);
+  } else if (m.status === 'error') {
+    btn.textContent = '⊙ TUNE';
+    btn.style.color = 'var(--red)';
+    setTimeout(() => { btn.style.color = ''; }, 2000);
+  }
+}
+
+function doSetup(){
+  const k=document.getElementById('keyIn').value.trim();
+  if(!k){alert('Please enter your Gemini API key.');return}
+  if(window._ws&&window._ws.readyState===1)
+    window._ws.send(JSON.stringify({type:'setup',key:k,os:chosenOS}));
+}
+
+// Auto-detect OS
+if(navigator.platform.toLowerCase().includes('win'))
+  document.querySelector('[data-os="windows"]').click();
+else if(navigator.platform.toLowerCase().includes('mac'))
+  document.querySelector('[data-os="mac"]').click();
+
+// ── Mute (non-module scope so onclick can reach it) ────────────────────────
+function toggleMute(){
+  if(window._ws&&window._ws.readyState===1)
+    window._ws.send(JSON.stringify({type:'mute'}));
+}
+function setMuted(v){
+  const b=document.getElementById('muteBtn');
+  b.textContent=v?'🔇 MUTED':'🎙 LIVE';
+  b.classList.toggle('on',v);
+}
+
+// ── Send (non-module scope) ────────────────────────────────────────────────
+function send(){
+  const i=document.getElementById('txtIn');
+  const t=i.value.trim();
+  if(!t||!window._ws||window._ws.readyState!==1)return;
+  window._ws.send(JSON.stringify({type:'text',text:t}));
+  i.value='';
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='F4'){e.preventDefault();toggleMute();}
+});
+</script>
+
+<!-- Module script: Three.js AvatarRenderer + WebSocket -->
+<script type="module">
+import { AvatarRenderer } from './avatar_renderer.js';
+
+// ── Avatar renderer setup ──────────────────────────────────────────────────
+const canvas = document.getElementById('avatarCanvas');
+let renderer = null;
+
+function stateToEmotion(state) {
+  switch (state) {
+    case 'THINKING':   return 'thinking';
+    case 'SPEAKING':   return 'neutral';
+    case 'LISTENING':  return 'listening';
+    case 'MUTED':      return 'neutral';
+    default:           return 'neutral';
+  }
+}
+
+function stateToBodyAnim(state) {
+  switch (state) {
+    case 'THINKING':  return 'thinking';
+    default:          return 'idle';
+  }
+}
+
+function setEmotionLabel(name) {
+  const el = document.getElementById('emotionLabel');
+  if (el) el.textContent = name.toUpperCase();
+}
+
+function initRenderer(avatarUrl) {
+  if (renderer) {
+    renderer.dispose();
+    renderer = null;
+  }
+  const noMsg = document.getElementById('noAvatarMsg');
+  if (avatarUrl) {
+    if (noMsg) noMsg.style.display = 'none';
+    renderer = new AvatarRenderer(canvas, avatarUrl);
+  } else {
+    if (noMsg) noMsg.style.display = 'flex';
+  }
+}
+
+// ── Local model list ────────────────────────────────────────────────────────
+async function loadModelList() {
+  try {
+    const res = await fetch('/api/models');
+    const files = await res.json();
+    const sel = document.getElementById('modelSelect');
+    files.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = '/public/' + f;
+      opt.textContent = f;
+      sel.appendChild(opt);
+    });
+    // Auto-select saved model in dropdown
+    const saved = localStorage.getItem('atlas_avatar_url') || '';
+    if (saved) sel.value = saved;
+  } catch (_) {}
+}
+loadModelList();
+
+// Load saved avatar URL from localStorage
+const savedUrl = localStorage.getItem('atlas_avatar_url') || '/public/face-model-blendshapes.glb';
+document.getElementById('avatarUrlIn').value = savedUrl;
+initRenderer(savedUrl);
+
+// Gear button toggle
+document.getElementById('gearBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('avatarConfig').classList.toggle('show');
+});
+document.addEventListener('click', (e) => {
+  const cfg = document.getElementById('avatarConfig');
+  if (!cfg.contains(e.target) && e.target.id !== 'gearBtn') {
+    cfg.classList.remove('show');
+  }
+});
+
+// Load selected dropdown model
+document.getElementById('loadAvatarBtn').addEventListener('click', () => {
+  const url = document.getElementById('modelSelect').value;
+  if (!url) return;
+  localStorage.setItem('atlas_avatar_url', url);
+  initRenderer(url);
+  document.getElementById('avatarConfig').classList.remove('show');
+});
+
+// Load manually typed URL
+document.getElementById('loadUrlBtn').addEventListener('click', () => {
+  const url = document.getElementById('avatarUrlIn').value.trim();
+  if (!url) return;
+  localStorage.setItem('atlas_avatar_url', url);
+  initRenderer(url);
+  document.getElementById('avatarConfig').classList.remove('show');
+});
+
+// ── Log helper ─────────────────────────────────────────────────────────────
+function addLog(cls, txt) {
+  const p = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = txt;
+  p.appendChild(d);
+  p.scrollTop = p.scrollHeight;
+}
+
+// ── WebSocket ──────────────────────────────────────────────────────────────
+let ws = null;
+
+function connect() {
+  ws = new WebSocket('ws://localhost:7862');
+  window._ws = ws;
+
+  ws.onopen = () => addLog('ls', 'SYS: Connection established.');
+  ws.onclose = () => {
+    addLog('le', 'SYS: Connection lost. Reconnecting...');
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = () => {};
+
+  ws.onmessage = async (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+
+    switch (m.type) {
+      case 'state': {
+        setState(m.value);
+        const emo = stateToEmotion(m.value);
+        setEmotionLabel(emo);
+        if (renderer) renderer.setEmotion(emo);
+        if (renderer) renderer.setBodyAnim(stateToBodyAnim(m.value));
+        break;
+      }
+
+      case 'log': {
+        const t = m.text || '';
+        if      (t.startsWith('You:'))    addLog('ly', t);
+        else if (t.startsWith('Atlas:') || t.startsWith('Jarvis:'))
+                                           addLog('la', t.replace(/^Jarvis:/, 'Atlas:'));
+        else if (t.startsWith('SYS:'))    addLog('ls', t);
+        else if (t.startsWith('ERR:'))    addLog('le', t);
+        else                              addLog('ls', t);
+        break;
+      }
+
+      case 'muted':
+        setMuted(m.value);
+        break;
+
+      case 'setup_status':
+        if (m.ready) document.getElementById('setup').classList.remove('show');
+        break;
+
+      case 'setup_done':
+        document.getElementById('setup').classList.remove('show');
+        addLog('ls', 'SYS: A.T.L.A.S online.');
+        break;
+
+      case 'avatar_data': {
+        if (renderer) {
+          setEmotionLabel(m.emotion || 'neutral');
+          await renderer.playSpeech(
+            m.audio_b64,
+            m.blendshapes,
+            m.n_frames,
+            m.fps,
+            m.emotion || 'neutral'
+          );
+          setEmotionLabel(m.emotion || 'neutral');
+        }
+        break;
+      }
+
+      case 'avatar_emotion': {
+        const emo = m.emotion || 'neutral';
+        setEmotionLabel(emo);
+        if (renderer) renderer.setEmotion(emo);
+        break;
+      }
+
+      case 'avatar_bs':
+        if (renderer) {
+          renderer.setBlendshapes(m.blendshapes);
+        } else {
+          console.warn('[avatar_bs] renderer not ready');
+        }
+        break;
+
+      case 'tune':
+        _handleTune(m);
+        break;
+    }
+  };
+}
+
+connect();
+</script>
+</body>
+</html>

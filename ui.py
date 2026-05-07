@@ -15,9 +15,11 @@ from pathlib import Path
 
 import websockets
 
-CONFIG_DIR = Path(__file__).resolve().parent / "config"
-API_FILE   = CONFIG_DIR / "api_keys.json"
-WEB_DIR    = Path(__file__).resolve().parent / "web"
+CONFIG_DIR  = Path(__file__).resolve().parent / "config"
+API_FILE    = CONFIG_DIR / "api_keys.json"
+WEB_DIR     = Path(__file__).resolve().parent / "web"
+PUBLIC_DIR  = Path(__file__).resolve().parent / "public"
+MODELS_DIR  = Path(__file__).resolve().parent / "models"
 HTTP_PORT  = 7861
 WS_PORT    = 7862
 
@@ -28,6 +30,7 @@ class AtlasUI:
     def __init__(self, face_path=None, size=None):
         self.muted           = False
         self.on_text_command = None
+        self.on_tune_command = None
         self._state          = "INITIALISING"
         self._clients: set   = set()
         self._ws_loop        = None
@@ -56,6 +59,40 @@ class AtlasUI:
     def wait_for_api_key(self):
         while not self._api_key_ready:
             time.sleep(0.1)
+
+    def broadcast_avatar_data(self, audio_b64: str, blendshapes: dict,
+                              n_frames: int, fps: int, emotion: str, text: str):
+        self._broadcast({
+            "type": "avatar_data",
+            "audio_b64": audio_b64,
+            "blendshapes": blendshapes,
+            "n_frames": n_frames,
+            "fps": fps,
+            "emotion": emotion,
+            "text": text,
+        })
+
+    def set_avatar_emotion(self, emotion: str):
+        self._broadcast({"type": "avatar_emotion", "emotion": emotion})
+
+    def broadcast_tune(self, status: str, value: float = 0.0):
+        """status: 'started' | 'progress' | 'done' | 'error'"""
+        self._broadcast({"type": "tune", "status": status, "value": value})
+
+    @property
+    def has_avatar_clients(self) -> bool:
+        return bool(self._clients)
+
+    def set_avatar_jaw(self, jaw: float):
+        self.set_avatar_blendshapes({
+            "jawOpen":     jaw,
+            "mouthOpen":   jaw * 0.65,
+            "mouthFunnel": jaw * 0.18,
+        })
+
+    def set_avatar_blendshapes(self, channels: dict):
+        """Broadcast arbitrary ARKit blendshape channels to avatar."""
+        self._broadcast({"type": "avatar_bs", "blendshapes": channels})
 
     def run(self):
         """Keep main thread alive (used instead of root.mainloop())."""
@@ -105,10 +142,52 @@ class AtlasUI:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                path = WEB_DIR / "atlas.html"
-                body = path.read_bytes() if path.exists() else b"<h1>atlas.html not found</h1>"
+                path = self.path.split("?")[0]  # strip query string
+
+                # /api/models → JSON list of GLB files in public/
+                if path == "/api/models":
+                    models = []
+                    if PUBLIC_DIR.exists():
+                        models = [f.name for f in sorted(PUBLIC_DIR.iterdir())
+                                  if f.suffix.lower() in (".glb", ".gltf")]
+                    body = json.dumps(models).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+
+                # /models/<file> → serve from models/ directory
+                if path.startswith("/models/"):
+                    rel = path[len("/models/"):]
+                    file_path = MODELS_DIR / rel
+                    if not MODELS_DIR.exists() or not file_path.exists() \
+                            or not file_path.resolve().is_relative_to(MODELS_DIR.resolve()):
+                        self.send_response(404); self.end_headers(); return
+
+                # /public/<file> → serve from public/ directory
+                elif path.startswith("/public/"):
+                    rel = path[len("/public/"):]
+                    file_path = PUBLIC_DIR / rel
+                    if not PUBLIC_DIR.exists() or not file_path.exists() \
+                            or not file_path.resolve().is_relative_to(PUBLIC_DIR.resolve()):
+                        self.send_response(404); self.end_headers(); return
+                else:
+                    req = path.lstrip("/") or "atlas.html"
+                    file_path = WEB_DIR / req
+                    if not file_path.exists() or not file_path.resolve().is_relative_to(WEB_DIR.resolve()):
+                        self.send_response(404); self.end_headers(); return
+
+                ext = file_path.suffix.lower()
+                mime = {"html": "text/html; charset=utf-8", "png": "image/png",
+                        "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                        "js": "application/javascript", "glb": "model/gltf-binary",
+                        "gltf": "model/gltf+json",
+                        "svg": "image/svg+xml", "ico": "image/x-icon"}.get(ext[1:], "application/octet-stream")
+                body = file_path.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Type", mime)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -154,6 +233,10 @@ class AtlasUI:
                 threading.Thread(
                     target=self.on_text_command, args=(text,), daemon=True
                 ).start()
+
+        elif t == "tune":
+            if self.on_tune_command:
+                threading.Thread(target=self.on_tune_command, daemon=True).start()
 
         elif t == "mute":
             self.muted = not self.muted

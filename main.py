@@ -5,6 +5,7 @@ import json
 import sys
 import traceback
 from pathlib import Path
+import numpy as np
 
 import sounddevice as sd
 from google import genai
@@ -41,11 +42,12 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-latest"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
-CHUNK_SIZE          = 1024
+IN_CHUNK            = 1024   # mic input: 64 ms → good for VAD
+OUT_CHUNK           = 4096   # audio output: 170 ms buffer → prevents ALSA underruns
 
 
 def _get_api_key() -> str:
@@ -72,6 +74,17 @@ def _clean_transcript(text: str) -> str:
     text = _CTRL_RE.sub("", text)
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
     return text.strip()
+
+
+def _detect_emotion(text: str) -> str:
+    t = text.lower()
+    if any(w in t for w in ["error", "fail", "sorry", "unfortunately", "hata", "üzgün", "maalesef"]):
+        return "concerned"
+    if any(w in t for w in ["great", "excellent", "perfect", "done", "harika", "mükemmel"]):
+        return "happy"
+    if any(w in t for w in ["searching", "looking", "let me", "arıyorum", "bakıyorum"]):
+        return "thinking"
+    return "neutral"
 
 
 # ── Tool declarations ──────────────────────────────────────────────────────────
@@ -154,7 +167,7 @@ TOOL_DECLARATIONS = [
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action": {"type": "STRING", "description": "play | summarize | get_info | trending (default: play)"},
+                "action": {"type": "STRING", "description": "play | pause | resume | stop | close | summarize | get_info | trending (default: play)"},
                 "query":  {"type": "STRING", "description": "Search query for play action"},
                 "save":   {"type": "BOOLEAN", "description": "Save summary to Notepad (summarize only)"},
                 "region": {"type": "STRING", "description": "Country code for trending e.g. TR, US"},
@@ -431,7 +444,14 @@ class JarvisLive:
         self._is_speaking   = False
         self._speaking_lock = threading.Lock()
         self.ui.on_text_command = self._on_text_command
+        self.ui.on_tune_command = self._start_tune
         self._turn_done_event: asyncio.Event | None = None
+        self._audio_buffer: list[bytes] = []
+        self._jaw_last_send = 0.0
+        self._jaw_smooth    = 0.0   # smoothed jaw value between chunks
+        self._noise_threshold = 0.0    # 0 = gate off
+        self._calib_samples: list[float] = []
+        self._calibrating = False
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -468,6 +488,96 @@ class JarvisLive:
         self.ui.write_log(f"ERR: {tool_name} — {short}")
         self.speak(f"Sir, {tool_name} encountered an error. {short}")
 
+    def _start_tune(self):
+        """2 saniye ortam gürültüsü kaydeder, noise gate eşiğini ayarlar."""
+        import numpy as np, time
+        self._calib_samples = []
+        self._calibrating = True
+        self.ui.broadcast_tune("started")
+        self.ui.write_log("SYS: Kalibrasyonu başladı — 2 saniye sessiz kal...")
+
+        try:
+            for remaining in range(2, 0, -1):
+                time.sleep(1)
+                self.ui.broadcast_tune("progress", remaining - 1)
+        finally:
+            self._calibrating = False  # her koşulda sıfırla — mic'i sonsuza kadar susturmaz
+
+        # IN_CHUNK=1024 → ~31 callbacks/2s; minimum 10 samples is enough
+        if len(self._calib_samples) < 10:
+            self.ui.broadcast_tune("error")
+            self.ui.write_log("ERR: Kalibrasyon başarısız — mikrofon sesi alınamadı.")
+            return
+
+        samples = np.array(self._calib_samples)
+        # Eşik = ortalama + 2 × standart sapma
+        threshold = float(samples.mean() + 2 * samples.std())
+        threshold = max(threshold, 0.005)   # minimum floor
+        threshold = min(threshold, 0.02)    # upper cap — prevents silencing actual speech
+        self._noise_threshold = threshold
+        self._calib_samples = []
+
+        db = 20 * np.log10(threshold + 1e-9)
+        self.ui.broadcast_tune("done", threshold)
+        self.ui.write_log(f"SYS: Noise gate ayarlandı — eşik {db:.1f} dB ({threshold:.4f})")
+        print(f"[ATLAS] 🎚  Noise threshold: {threshold:.4f} ({db:.1f} dB)")
+
+    def _drive_jaw_realtime(self, pcm_bytes: bytes):
+        """Kept for compatibility — jaw is now driven from _play_audio."""
+        pass
+
+    def _drive_mouth_from_chunk(self, pcm_bytes: bytes):
+        """RMS → smoothed jaw blendshapes. Called per played chunk (~170ms)."""
+        import numpy as np
+        try:
+            samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            if len(samples) < 8:
+                return
+
+            rms = float(np.sqrt(np.mean(samples ** 2)))
+
+            # Square-root curve: small sounds stay small, loud ones open more
+            # Cap at 0.45 — natural speech never fully opens the jaw
+            raw = min(0.45, (rms ** 0.55) * 1.8)
+
+            # Smooth toward target: open fast (0.45), close slow (0.2)
+            alpha = 0.45 if raw > self._jaw_smooth else 0.20
+            self._jaw_smooth += alpha * (raw - self._jaw_smooth)
+            jaw = self._jaw_smooth
+
+            self.ui.set_avatar_blendshapes({
+                "jawOpen":             jaw,
+                "mouthOpen":           jaw * 0.55,
+                "mouthFunnel":         jaw * 0.12,
+                "mouthShrugUpper":     jaw * 0.18,
+                "mouthShrugLower":     jaw * 0.14,
+                "mouthLowerDownLeft":  jaw * 0.22,
+                "mouthLowerDownRight": jaw * 0.22,
+                "mouthClose":          max(0.0, 0.08 - jaw * 0.18),
+            })
+        except Exception:
+            pass
+
+    def _dispatch_avatar(self, pcm_bytes: bytes, text: str):
+        """Send audio turn to lipsync service and broadcast result to avatar UI."""
+        try:
+            from lipsync.client import get_blendshapes, amplitude_fallback, is_available
+            emotion = _detect_emotion(text)
+            self.ui.set_avatar_emotion("thinking")
+            result = get_blendshapes(pcm_bytes) if is_available() else None
+            if result is None:
+                result = amplitude_fallback(pcm_bytes)
+            self.ui.broadcast_avatar_data(
+                audio_b64  = result["audio_b64"],
+                blendshapes= result["blendshapes"],
+                n_frames   = result["n_frames"],
+                fps        = result["fps"],
+                emotion    = emotion,
+                text       = text,
+            )
+        except Exception as e:
+            print(f"[Avatar] ⚠️  {e}")
+
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
 
@@ -490,8 +600,8 @@ class JarvisLive:
 
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
-            output_audio_transcription={},
-            input_audio_transcription={},
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": TOOL_DECLARATIONS}],
             session_resumption=types.SessionResumptionConfig(),
@@ -634,29 +744,47 @@ class JarvisLive:
 
     async def _send_realtime(self):
         while True:
-            msg = await self.out_queue.get()
-            await self.session.send_realtime_input(media=msg)
+            data = await self.out_queue.get()
+            await self.session.send_realtime_input(
+                audio={"data": data, "mime_type": "audio/pcm;rate=16000"}
+            )
 
     async def _listen_audio(self):
         print("[ATLAS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
 
         def callback(indata, frames, time_info, status):
+            import numpy as np
+            samples = indata.astype(np.float32) / 32768.0
+            rms = float(np.sqrt(np.mean(samples ** 2)))
+
+            # Kalibrasyon modu: ses yerine gürültü örnekleri topla
+            if self._calibrating:
+                self._calib_samples.append(rms)
+                return
+
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
             if not jarvis_speaking and not self.ui.muted:
+                # Noise gate: eşiğin altındaysa gönderme
+                if self._noise_threshold > 0 and rms < self._noise_threshold:
+                    return
                 data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                # Schedule put on event loop; drop if still full (race-safe)
+                def _safe_put(d=data):
+                    if self.out_queue.full():
+                        try: self.out_queue.get_nowait()
+                        except Exception: pass
+                    try: self.out_queue.put_nowait(d)
+                    except Exception: pass
+                loop.call_soon_threadsafe(_safe_put)
 
         try:
             with sd.InputStream(
                 samplerate=SEND_SAMPLE_RATE,
                 channels=CHANNELS,
                 dtype="int16",
-                blocksize=CHUNK_SIZE,
+                blocksize=IN_CHUNK,
                 callback=callback,
             ):
                 print("[ATLAS] 🎤 Mic stream open")
@@ -678,6 +806,8 @@ class JarvisLive:
                         if self._turn_done_event and self._turn_done_event.is_set():
                             self._turn_done_event.clear()
                         self.audio_in_queue.put_nowait(response.data)
+                        self._audio_buffer.append(response.data)
+                        self._drive_jaw_realtime(response.data)
 
                     if response.server_content:
                         sc = response.server_content
@@ -706,6 +836,12 @@ class JarvisLive:
                                 self.ui.write_log(f"Atlas: {full_out}")
                             out_buf = []
 
+                            # Close jaw and send emotion
+                            self.ui.set_avatar_jaw(0.0)
+                            self.ui.set_avatar_emotion(_detect_emotion(full_out))
+
+                            self._audio_buffer = []
+
                     if response.tool_call:
                         fn_responses = []
                         for fc in response.tool_call.function_calls:
@@ -722,13 +858,15 @@ class JarvisLive:
             raise
 
     async def _play_audio(self):
+        """Play audio to sounddevice ONLY when no avatar browser is connected.
+        When avatar is active, audio goes through browser (avatar_data message) for sync."""
         print("[ATLAS] 🔊 Play started")
 
         stream = sd.RawOutputStream(
             samplerate=RECEIVE_SAMPLE_RATE,
             channels=CHANNELS,
             dtype="int16",
-            blocksize=CHUNK_SIZE,
+            blocksize=OUT_CHUNK,
         )
         stream.start()
 
@@ -751,6 +889,7 @@ class JarvisLive:
 
                 self.set_speaking(True)
                 await asyncio.to_thread(stream.write, chunk)
+                self._drive_mouth_from_chunk(chunk)
 
         except Exception as e:
             print(f"[ATLAS] ❌ Play: {e}")
