@@ -108,13 +108,15 @@ class AvatarRenderer {
     this._scene.environment = pmrem.fromScene(new RoomEnvironment()).texture;
     pmrem.dispose();
 
-    // Sci-fi accent lights on top of the neutral env
-    const dirLight = new THREE.DirectionalLight(0x00d4ff, 0.6);
-    dirLight.position.set(0.5, 3, 2);
+    // Ambient base — lifts shadows uniformly
+    // Key light
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(0.5, 3, 3);
     this._scene.add(dirLight);
 
-    const fillLight = new THREE.DirectionalLight(0x334455, 0.3);
-    fillLight.position.set(-1.5, 1, 1);
+    // Fill light
+    const fillLight = new THREE.DirectionalLight(0x88aacc, 0.2);
+    fillLight.position.set(-2, 1, 1);
     this._scene.add(fillLight);
 
     // Model group (holds the loaded avatar)
@@ -237,7 +239,7 @@ class AvatarRenderer {
             if (node.isMesh) {
               node.castShadow = true;
               node.frustumCulled = false;
-              if (node.material) node.material.envMapIntensity = 0.3;
+              if (node.material) node.material.envMapIntensity = 0.4;
             }
           });
 
