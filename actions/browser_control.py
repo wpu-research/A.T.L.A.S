@@ -1,5 +1,5 @@
 """
-browser_control.py  —  JARVIS Browser Action Module
+browser_control.py  —  ATLAS Browser Action Module
 ====================================================
 Desteklenen tarayıcılar : chrome, edge, firefox, opera, operagx, brave, vivaldi, safari (macOS)
 Desteklenen platformlar  : Windows · macOS · Linux
@@ -124,7 +124,7 @@ def _real_profile_dir(browser: str) -> str:
             print(f"[Browser] ✅ Real profile found for {browser}: {p}")
             return str(p)
 
-    fallback = home / ".jarvis_profiles" / browser
+    fallback = home / ".atlas_profiles" / browser
     fallback.mkdir(parents=True, exist_ok=True)
     print(f"[Browser] ⚠️  Real profile not found for {browser}, using: {fallback}")
     return str(fallback)
@@ -459,7 +459,7 @@ class _BrowserSession:
         # ── Firefox ───────────────────────────────────────────────────────────
         if engine_name == "firefox":
             profile = _firefox_profile_dir() or str(
-                Path.home() / ".jarvis_profiles" / "firefox"
+                Path.home() / ".atlas_profiles" / "firefox"
             )
             kwargs: dict = {
                 "headless":    False,
@@ -472,13 +472,13 @@ class _BrowserSession:
             try:
                 self._context = await engine_obj.launch_persistent_context(profile, **kwargs)
             except Exception as e:
-                print(f"[Browser] Firefox real profile failed ({e}), using JARVIS profile")
-                jarvis = str(Path.home() / ".jarvis_profiles" / "firefox_jarvis")
-                Path(jarvis).mkdir(parents=True, exist_ok=True)
-                self._context = await engine_obj.launch_persistent_context(jarvis, **kwargs)
+                print(f"[Browser] Firefox real profile failed ({e}), using ATLAS profile")
+                atlas = str(Path.home() / ".atlas_profiles" / "firefox_atlas")
+                Path(atlas).mkdir(parents=True, exist_ok=True)
+                self._context = await engine_obj.launch_persistent_context(atlas, **kwargs)
 
             await asyncio.sleep(0.5)  # let the browser settle
-            # Always open a dedicated JARVIS tab instead of grabbing pages[0],
+            # Always open a dedicated ATLAS tab instead of grabbing pages[0],
             # which may already be about:blank or a stale restored tab.
             self._page = await self._context.new_page()
             print(f"[Browser] ✅ Firefox launched")
@@ -486,7 +486,7 @@ class _BrowserSession:
 
         # ── Safari (webkit) ───────────────────────────────────────────────────
         if engine_name == "webkit":
-            safari_profile = str(Path.home() / ".jarvis_profiles" / "safari")
+            safari_profile = str(Path.home() / ".atlas_profiles" / "safari")
             Path(safari_profile).mkdir(parents=True, exist_ok=True)
             kwargs = {
                 "headless":    False,
@@ -538,16 +538,16 @@ class _BrowserSession:
         except Exception as e:
             print(f"[Browser] ⚠️  Real profile failed for {label}: {e}")
 
-        # 2) JARVIS fallback profili
-        jarvis_profile = str(Path.home() / ".jarvis_profiles" / self.browser_name)
-        Path(jarvis_profile).mkdir(parents=True, exist_ok=True)
-        print(f"[Browser] Retrying with JARVIS profile: {jarvis_profile}")
+        # 2) ATLAS fallback profili
+        atlas_profile = str(Path.home() / ".atlas_profiles" / self.browser_name)
+        Path(atlas_profile).mkdir(parents=True, exist_ok=True)
+        print(f"[Browser] Retrying with ATLAS profile: {atlas_profile}")
 
         try:
-            self._context = await engine_obj.launch_persistent_context(jarvis_profile, **kwargs)
+            self._context = await engine_obj.launch_persistent_context(atlas_profile, **kwargs)
             await asyncio.sleep(0.5)
             self._page = await self._context.new_page()
-            print(f"[Browser] ✅ Launched [{label}] with JARVIS profile")
+            print(f"[Browser] ✅ Launched [{label}] with ATLAS profile")
         except Exception as e2:
             raise RuntimeError(f"Could not launch {self.browser_name}: {e2}") from e2
 
@@ -569,7 +569,7 @@ class _BrowserSession:
 
         • Uses a 30-second timeout to handle heavy sites like YouTube.
         • On PlaywrightTimeout we check whether the URL actually changed;
-          if it did, treat it as success so JARVIS won't retry endlessly.
+          if it did, treat it as success so ATLAS won't retry endlessly.
         • If the page is still about:blank after navigation, open a fresh tab
           and try once more (covers stale-page edge cases in Opera GX etc.).
         """
@@ -751,7 +751,7 @@ class _BrowserSession:
     async def screenshot(self, path: str = None) -> str:
         page = await self._get_page()
         try:
-            save_path = path or str(Path.home() / "Desktop" / "jarvis_screenshot.png")
+            save_path = path or str(Path.home() / "Desktop" / "atlas_screenshot.png")
             await page.screenshot(path=save_path, full_page=False)
             return f"Screenshot saved: {save_path}"
         except Exception as e:

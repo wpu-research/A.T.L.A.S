@@ -446,7 +446,7 @@ Saves important user facts to persistent long-term memory so they carry over acr
 
 ---
 
-### 19. Shutdown Assistant — `shutdown_jarvis`
+### 19. Shutdown Assistant — `shutdown_atlas`
 
 Gracefully terminates the A.T.L.A.S session. Responds to shutdown intent in any language ("goodbye", "bye", "exit", "close", "kapat", "güle güle").
 

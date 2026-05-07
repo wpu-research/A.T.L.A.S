@@ -10,7 +10,7 @@ import numpy as np
 import sounddevice as sd
 from google import genai
 from google.genai import types
-from ui import JarvisUI
+from ui import AtlasUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
 )
@@ -469,9 +469,9 @@ TOOL_DECLARATIONS = [
         }
     },
     {
-        "name": "shutdown_jarvis",
+        "name": "shutdown_atlas",
         "description": (
-            "Shuts down the assistant completely. "
+            "Shuts down A.T.L.A.S completely. "
             "Call this when the user expresses intent to end the conversation, "
             "close the assistant, say goodbye, or stop Atlas. "
             "The user can say this in ANY language."
@@ -514,9 +514,9 @@ TOOL_DECLARATIONS = [
 ]
 
 
-class JarvisLive:
+class AtlasLive:
 
-    def __init__(self, ui: JarvisUI):
+    def __init__(self, ui: AtlasUI):
         self.ui             = ui
         self.session        = None
         self.audio_in_queue = None
@@ -860,7 +860,7 @@ class JarvisLive:
                 r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
                 result = r or "Done."
 
-            elif name == "shutdown_jarvis":
+            elif name == "shutdown_atlas":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("Goodbye, sir. A.T.L.A.S shutting down.")
                 def _shutdown():
@@ -908,8 +908,8 @@ class JarvisLive:
                 return
 
             with self._speaking_lock:
-                jarvis_speaking = self._is_speaking
-            if not jarvis_speaking and not self.ui.muted:
+                atlas_speaking = self._is_speaking
+            if not atlas_speaking and not self.ui.muted:
                 # Noise gate: eşiğin altındaysa gönderme
                 if self._noise_threshold > 0 and rms < self._noise_threshold:
                     return
@@ -1127,13 +1127,13 @@ class JarvisLive:
 
 
 def main():
-    ui = JarvisUI("face.png")
+    ui = AtlasUI("face.png")
 
     def runner():
         ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
+        atlas = AtlasLive(ui)
         try:
-            asyncio.run(jarvis.run())
+            asyncio.run(atlas.run())
         except KeyboardInterrupt:
             print("\n🔴 Shutting down...")
 

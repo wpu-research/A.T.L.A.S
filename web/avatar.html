@@ -662,8 +662,8 @@ function connect() {
       case 'log': {
         const t = m.text || '';
         if      (t.startsWith('You:'))    addLog('ly', t);
-        else if (t.startsWith('Atlas:') || t.startsWith('Jarvis:'))
-                                           addLog('la', t.replace(/^Jarvis:/, 'Atlas:'));
+        else if (t.startsWith('Atlas:') || t.startsWith('Atlas:'))
+                                           addLog('la', t.replace(/^Atlas:/, 'Atlas:'));
         else if (t.startsWith('SYS:'))    addLog('ls', t);
         else if (t.startsWith('ERR:'))    addLog('le', t);
         else                              addLog('ls', t);

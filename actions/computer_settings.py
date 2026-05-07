@@ -639,9 +639,16 @@ def computer_settings(
                 f"Please confirm by calling again with confirmed=yes."
             )
 
-    if action == "volume_set":
+    if action in ("volume_set", "volume"):
         try:
-            volume_set(int(value or 50))
+            import re as _re
+            if value is None:
+                # parse number from description e.g. "set volume to 80%"
+                m = _re.search(r"(\d+)", description or "")
+                value = int(m.group(1)) if m else None
+            if value is None:
+                return "Please specify a volume level (0-100)."
+            volume_set(int(value))
             return f"Volume set to {value}%."
         except Exception as e:
             return f"Could not set volume: {e}"

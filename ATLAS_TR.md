@@ -402,7 +402,7 @@ Kullanıcı hakkındaki önemli bilgileri kalıcı olarak uzun süreli hafızaya
 
 ---
 
-### 19. Asistanı Kapat — `shutdown_jarvis`
+### 19. Asistanı Kapat — `shutdown_atlas`
 
 A.T.L.A.S oturumunu güvenli şekilde sonlandırır. Her dilde çalışır ("kapat", "güle güle", "bye", "exit").
 

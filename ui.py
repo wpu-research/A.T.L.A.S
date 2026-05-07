@@ -270,4 +270,4 @@ class _DummyRoot:
         self._ui.run()
 
 # backward-compat alias
-JarvisUI = AtlasUI
+AtlasLive = AtlasUI  # backward-compat alias

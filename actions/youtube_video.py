@@ -163,7 +163,7 @@ def _summarize_with_gemini(transcript: str, video_url: str) -> str:
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash",
         system_instruction=(
-            "You are JARVIS, an AI assistant. "
+            "You are ATLAS, an AI assistant. "
             "Summarize YouTube video transcripts clearly and concisely. "
             "Structure: 1-sentence overview, then 3-5 key points. "
             "Be direct. Address the user as 'sir'. "
@@ -187,7 +187,7 @@ def _save_summary(content: str, video_url: str) -> str:
     filepath = desktop / filename
 
     header = (
-        f"JARVIS — YouTube Summary\n"
+        f"ATLAS — YouTube Summary\n"
         f"{'─' * 50}\n"
         f"URL    : {video_url}\n"
         f"Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
@@ -266,6 +266,122 @@ def _scrape_trending(region: str = "TR", max_results: int = 8) -> list[dict]:
     except Exception as e:
         print(f"[YouTube] ⚠️ Trending scrape failed: {e}")
         return []
+
+def _find_youtube_window():
+    """Return (display, window) for a YouTube/browser window."""
+    try:
+        from Xlib import display as xdisplay, X
+
+        d    = xdisplay.Display()
+        root = d.screen().root
+
+        NET_CLIENT_LIST = d.intern_atom("_NET_CLIENT_LIST")
+        wm_name_atom    = d.intern_atom("_NET_WM_NAME")
+        utf8_atom       = d.intern_atom("UTF8_STRING")
+
+        client_list = root.get_full_property(NET_CLIENT_LIST, X.AnyPropertyType)
+        if not client_list:
+            return None, None
+
+        browser_keywords = ["youtube", "chrome", "chromium", "firefox", "brave", "opera"]
+        best = None
+
+        for wid in client_list.value:
+            try:
+                win = d.create_resource_object("window", wid)
+
+                # Check _NET_WM_NAME (UTF-8)
+                prop = win.get_full_property(wm_name_atom, utf8_atom)
+                title = prop.value.decode("utf-8", errors="ignore") if prop else ""
+                if not title:
+                    raw = win.get_wm_name()
+                    title = str(raw) if raw else ""
+
+                title_lower = title.lower()
+                if "youtube" in title_lower:
+                    return d, win  # exact match
+
+                # Check WM_CLASS
+                cls = win.get_wm_class()
+                cls_str = " ".join(cls).lower() if cls else ""
+                if any(k in cls_str or k in title_lower for k in browser_keywords):
+                    best = (d, win)
+            except Exception:
+                continue
+
+        return best if best else (d, None)
+    except Exception:
+        return None, None
+
+
+def _send_key_to_youtube(key: str) -> bool:
+    """Focus the YouTube browser window and send a key press."""
+    try:
+        from Xlib import display as xdisplay, X
+        from Xlib.ext.xtest import fake_input
+        import Xlib.XK as XK
+
+        d, win = _find_youtube_window()
+        if not win:
+            return False
+
+        # Raise & focus
+        win.set_input_focus(X.RevertToParent, X.CurrentTime)
+        win.configure(stack_mode=X.Above)
+        d.sync()
+
+        # Send key via XTEST
+        keysym = XK.string_to_keysym(key)
+        keycode = d.keysym_to_keycode(keysym)
+        fake_input(d, X.KeyPress,   keycode)
+        fake_input(d, X.KeyRelease, keycode)
+        d.sync()
+        return True
+    except Exception as e:
+        print(f"[YouTube] ⚠️ send_key failed: {e}")
+        return False
+
+
+def _close_youtube_window() -> bool:
+    """Close the YouTube browser window."""
+    try:
+        from Xlib import display as xdisplay, X
+
+        d, win = _find_youtube_window()
+        if not win:
+            return False
+
+        WM_DELETE = d.intern_atom("WM_DELETE_WINDOW")
+        WM_PROTO  = d.intern_atom("WM_PROTOCOLS")
+
+        import Xlib.protocol.event as xevent
+        ev = xevent.ClientMessage(
+            window=win,
+            client_type=WM_PROTO,
+            data=(32, [WM_DELETE, X.CurrentTime, 0, 0, 0])
+        )
+        win.send_event(ev, event_mask=X.NoEventMask)
+        d.sync()
+        return True
+    except Exception as e:
+        print(f"[YouTube] ⚠️ close_window failed: {e}")
+        return False
+
+
+def _handle_pause(parameters: dict, player, speak=None) -> str:
+    ok = _send_key_to_youtube("k")
+    return "Paused." if ok else "Could not find YouTube window to pause."
+
+
+def _handle_resume(parameters: dict, player, speak=None) -> str:
+    ok = _send_key_to_youtube("k")
+    return "Resumed." if ok else "Could not find YouTube window to resume."
+
+
+def _handle_close(parameters: dict, player, speak=None) -> str:
+    ok = _close_youtube_window()
+    return "YouTube closed." if ok else "Could not find YouTube window to close."
+
 
 def _handle_play(parameters: dict, player) -> str:
     query = parameters.get("query", "").strip()
@@ -391,6 +507,10 @@ def _handle_trending(parameters: dict, player, speak) -> str:
 
 _ACTION_MAP = {
     "play":      _handle_play,
+    "pause":     _handle_pause,
+    "resume":    _handle_resume,
+    "stop":      _handle_pause,
+    "close":     _handle_close,
     "summarize": _handle_summarize,
     "get_info":  _handle_get_info,
     "trending":  _handle_trending,
