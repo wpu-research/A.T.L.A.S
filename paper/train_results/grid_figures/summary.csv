@@ -1,0 +1,3 @@
+name,arch,n_utts,val_mse,val_mae,lvd_mean,lvd_p95,lag_mean,lag_std,vel_ratio
+grid_runs,transformer,500,0.00751,0.04601,0.27215,0.60284,80.60000,137.46626,0.41870
+grid_runs_lstm,lstm,500,0.00689,0.04286,0.25662,0.59304,73.10000,139.23302,0.42996
