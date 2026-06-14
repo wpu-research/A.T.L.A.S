@@ -4,7 +4,7 @@
 import re
 from pathlib import Path
 from docx import Document
-from docx.shared import Pt, Cm, RGBColor
+from docx.shared import Pt, Cm, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
@@ -70,6 +70,17 @@ def main():
     first_h1 = True
     while i < len(lines):
         line = lines[i]
+
+        # images: ![alt](path)
+        m = re.match(r"^!\[[^\]]*\]\(([^)]+)\)$", line.strip())
+        if m:
+            img_path = SRC.parent / m.group(1)
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run()
+            run.add_picture(str(img_path), width=Inches(6.0))
+            i += 1
+            continue
 
         # tables
         if line.startswith("|") and i + 1 < len(lines) and re.match(r"^\|[\s:|-]+\|$", lines[i + 1].strip()):

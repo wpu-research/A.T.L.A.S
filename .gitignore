@@ -8,3 +8,7 @@ memory/long_term.json
 # Cache / temp
 tmp/
 lipsync/audio2lipsync/python/src/checkpoints/
+
+# Paper raw evaluation working data (regenerable, multi-GB) — kept out of git
+paper/eval_work/
+paper/eval_audio/
