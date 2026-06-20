@@ -27,6 +27,25 @@ def shade_cell(cell, hex_color):
     tcPr.append(shd)
 
 
+def fit_table_to_page(table):
+    """Make a table span the full text width and autofit columns to content,
+    so wide (e.g. 4-column) tables wrap inside the page instead of overflowing."""
+    tblPr = table._tbl.tblPr
+    # total width = 100% of the text column
+    for tag in ("w:tblW", "w:tblLayout"):
+        existing = tblPr.find(qn(tag))
+        if existing is not None:
+            tblPr.remove(existing)
+    tblW = OxmlElement("w:tblW")
+    tblW.set(qn("w:type"), "pct")
+    tblW.set(qn("w:w"), "5000")  # 5000 fiftieths of a percent = 100%
+    tblPr.append(tblW)
+    layout = OxmlElement("w:tblLayout")
+    layout.set(qn("w:type"), "autofit")
+    tblPr.append(layout)
+    table.autofit = True
+
+
 INLINE = re.compile(r"(\*\*.+?\*\*|\*[^*]+?\*|`[^`]+?`)")
 
 
@@ -104,6 +123,7 @@ def main():
                 for j, val in enumerate(row[: len(header)]):
                     p = table.rows[ri + 1].cells[j].paragraphs[0]
                     add_runs(p, val, 9.5)
+            fit_table_to_page(table)
             doc.add_paragraph()
             continue
 
