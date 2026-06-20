@@ -8,7 +8,7 @@ import requests
 
 LIPSYNC_URL  = "http://localhost:8765"
 SAMPLE_RATE  = 24000  # Gemini Live output rate
-_TIMEOUT     = 10.0
+_TIMEOUT     = 120.0  # CPU HuBERT inference can take several seconds for long turns
 
 def _pcm_to_wav_b64(pcm_bytes: bytes) -> str:
     buf = io.BytesIO()
@@ -41,6 +41,7 @@ def get_blendshapes(pcm_bytes: bytes) -> dict | None:
             "blendshapes": d.get("arkit_raw", {}),
             "n_frames": d.get("n_frames", 0),
             "fps": 60,
+            "generation_ms": d.get("generation_ms", 0.0),
         }
     except Exception as e:
         print(f"[LipSync] ⚠️  {e}")

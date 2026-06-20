@@ -31,6 +31,8 @@ class AtlasUI:
         self.muted           = False
         self.on_text_command = None
         self.on_tune_command = None
+        self.on_toggle_command = None
+        self._lipsync_state  = {"sys1": True, "sys2": False}
         self._state          = "INITIALISING"
         self._clients: set   = set()
         self._ws_loop        = None
@@ -93,6 +95,11 @@ class AtlasUI:
     def set_avatar_blendshapes(self, channels: dict):
         """Broadcast arbitrary ARKit blendshape channels to avatar."""
         self._broadcast({"type": "avatar_bs", "blendshapes": channels})
+
+    def broadcast_lipsync_state(self, sys1: bool, sys2: bool):
+        """Echo current lip-sync system toggle state back to the UI."""
+        self._lipsync_state = {"sys1": sys1, "sys2": sys2}
+        self._broadcast({"type": "lipsync_state", "sys1": sys1, "sys2": sys2})
 
     def run(self):
         """Keep main thread alive (used instead of root.mainloop())."""
@@ -213,6 +220,7 @@ class AtlasUI:
         try:
             await ws.send(json.dumps({"type": "state", "value": self._state}))
             await ws.send(json.dumps({"type": "setup_status", "ready": self._api_key_ready}))
+            await ws.send(json.dumps({"type": "lipsync_state", **self._lipsync_state}))
             async for raw in ws:
                 try:
                     msg = json.loads(raw)
@@ -237,6 +245,12 @@ class AtlasUI:
         elif t == "tune":
             if self.on_tune_command:
                 threading.Thread(target=self.on_tune_command, daemon=True).start()
+
+        elif t == "toggle":
+            system = msg.get("system", "")
+            value  = bool(msg.get("value", False))
+            if system in ("sys1", "sys2") and self.on_toggle_command:
+                self.on_toggle_command(system, value)
 
         elif t == "mute":
             self.muted = not self.muted

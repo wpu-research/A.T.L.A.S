@@ -186,11 +186,28 @@ header{
 }
 .send-btn:hover{background:var(--pri);color:#000}
 .bottom-links{
-  display:flex;align-items:center;justify-content:flex-start;
+  display:flex;align-items:center;justify-content:space-between;
   font-size:8px;color:var(--dim);letter-spacing:.12em;
 }
 .bottom-links a{color:var(--sec);text-decoration:none;transition:color .2s}
 .bottom-links a:hover{color:var(--pri)}
+
+/* ── Lip-sync system toggles ── */
+.lipsync-row{display:flex;align-items:center;gap:8px}
+.lipsync-row .ls-label{font-size:8px;color:var(--dim);letter-spacing:.18em}
+.toggle-btn{
+  height:24px;padding:0 12px;background:rgba(255,51,102,.05);
+  border:1px solid var(--dim);color:var(--sec);
+  font-family:monospace;font-size:8px;letter-spacing:.12em;cursor:pointer;
+  white-space:nowrap;transition:all .2s;display:flex;align-items:center;gap:5px;
+}
+.toggle-btn:hover{border-color:var(--sec)}
+.toggle-btn .tg-dot{width:6px;height:6px;border-radius:50%;background:var(--red);
+  box-shadow:0 0 5px var(--red);transition:all .2s}
+.toggle-btn.active{
+  border-color:var(--green);color:var(--green);background:rgba(0,255,136,.06);
+}
+.toggle-btn.active .tg-dot{background:var(--green);box-shadow:0 0 6px var(--green)}
 
 /* ── Setup overlay ── */
 .setup{
@@ -359,6 +376,17 @@ body[data-s="MUTED"] .s-dot{animation:none;background:var(--red);box-shadow:0 0 
              onkeydown="if(event.key==='Enter')send()">
       <button class="send-btn" onclick="send()">SEND &#9656;</button>
     </div>
+    <div class="lipsync-row">
+      <span class="ls-label">LIP-SYNC ENGINE:</span>
+      <button class="toggle-btn active" id="sys1Btn" onclick="toggleSys('sys1')"
+              title="Real-time text→viseme (TranscriptionSync, zero latency)">
+        <span class="tg-dot"></span>SYS1 &middot; LIVE VISEME
+      </button>
+      <button class="toggle-btn" id="sys2Btn" onclick="toggleSys('sys2')"
+              title="Post-turn HuBERT neural blendshapes (high quality, buffered — audio plays in browser)">
+        <span class="tg-dot"></span>SYS2 &middot; HuBERT
+      </button>
+    </div>
     <div class="bottom-links">
       <a href="atlas.html">&#8592; Classic UI</a>
     </div>
@@ -471,6 +499,21 @@ function send(){
 document.addEventListener('keydown',e=>{
   if(e.key==='F4'){e.preventDefault();toggleMute();}
 });
+
+// ── Lip-sync engine toggles ────────────────────────────────────────────────
+const lipsyncState = {sys1:true, sys2:false};
+function toggleSys(system){
+  const next = !lipsyncState[system];
+  if(window._ws&&window._ws.readyState===1)
+    window._ws.send(JSON.stringify({type:'toggle',system:system,value:next}));
+  // Optimistic UI update (server echoes lipsync_state to confirm)
+  lipsyncState[system]=next;
+  applyLipsyncState();
+}
+function applyLipsyncState(){
+  document.getElementById('sys1Btn').classList.toggle('active',lipsyncState.sys1);
+  document.getElementById('sys2Btn').classList.toggle('active',lipsyncState.sys2);
+}
 </script>
 
 <!-- Module script: Three.js AvatarRenderer + WebSocket -->
@@ -715,6 +758,12 @@ function connect() {
 
       case 'tune':
         _handleTune(m);
+        break;
+
+      case 'lipsync_state':
+        lipsyncState.sys1 = !!m.sys1;
+        lipsyncState.sys2 = !!m.sys2;
+        applyLipsyncState();
         break;
     }
   };

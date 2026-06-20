@@ -1,0 +1,62 @@
+{
+  "offline_sys2_N50_cpu": {
+    "buffer_ms": 15564.0,
+    "inference_ms": 5676.7357999999995,
+    "transport_ms": 63.44968468018709,
+    "total_added_ms": 21304.185484680187
+  },
+  "live_sys1": {
+    "n": 8,
+    "text_lead_ms": {
+      "mean": -349.2,
+      "ci95": [
+        -379.7,
+        -320.8
+      ],
+      "n": 7
+    },
+    "sys1_added_ms": {
+      "mean": 20.7,
+      "ci95": [
+        20.4,
+        20.9
+      ],
+      "n": 7
+    },
+    "audio_dur_ms": 3270.0
+  },
+  "live_sys2_cpu": {
+    "n": 4,
+    "buffer_ms": {
+      "mean": 3146.9,
+      "ci95": [
+        2435.3,
+        3858.4
+      ],
+      "n": 4
+    },
+    "generation_ms": {
+      "mean": 1769.0,
+      "ci95": [
+        1052.8,
+        2485.2
+      ],
+      "n": 4
+    },
+    "total_added_ms": {
+      "mean": 4946.3,
+      "ci95": [
+        3514.1,
+        6378.5
+      ],
+      "n": 4
+    },
+    "audio_dur_ms": 3160.0
+  },
+  "mfa_oracle_N50_cpu": {
+    "buffer_ms": 15564.0,
+    "compute_ms_per_utt": 2047.0,
+    "total_added_ms": 17611.0,
+    "note": "forced alignment (english_us_arpa), batch-amortized; non-causal: needs whole utterance + transcript; LVD reference (oracle) in Table 4"
+  }
+}

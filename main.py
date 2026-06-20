@@ -3,6 +3,7 @@ import re
 import threading
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 import numpy as np
@@ -526,7 +527,20 @@ class AtlasLive:
         self._speaking_lock = threading.Lock()
         self.ui.on_text_command = self._on_text_command
         self.ui.on_tune_command = self._start_tune
+        self.ui.on_toggle_command = self._on_toggle
         self._turn_done_event: asyncio.Event | None = None
+        # ── Lip-sync system toggles (compared live via UI buttons) ──
+        # SYS1 = real-time text→viseme (TranscriptionSync, zero latency)
+        # SYS2 = post-turn HuBERT neural blendshapes (high quality, buffered)
+        self._sys1_enabled = True
+        self._sys2_enabled = False
+        # ── Live latency instrumentation (per-turn perf_counter stamps) ──
+        # Written to BASE_DIR/eval_work/live_latency.jsonl; aggregated by
+        # paper/tools/latency_live.py. Confirms the offline buffer estimate
+        # against real Gemini streaming timing.
+        self._lat: dict = {}
+        self._lat_lock = threading.Lock()
+        self._lat_path = BASE_DIR / "eval_work" / "live_latency.jsonl"
         self._audio_buffer: list[bytes] = []
         self._jaw_last_send  = 0.0
         self._jaw_smooth     = 0.0
@@ -550,6 +564,69 @@ class AtlasLive:
             ),
             self._loop
         )
+
+    def _on_toggle(self, system: str, value: bool):
+        """UI button toggled a lip-sync system on/off."""
+        if system == "sys1":
+            self._sys1_enabled = value
+            if not value:
+                # Stop live viseme worker, close mouth
+                if self._viseme_q:
+                    self._viseme_q.put(None)
+                self._viseme_running = False
+                self.ui.set_avatar_jaw(0.0)
+        elif system == "sys2":
+            self._sys2_enabled = value
+        print(f"[ATLAS] 🎛  {system.upper()} = {'ON' if value else 'OFF'} "
+              f"(SYS1={self._sys1_enabled}, SYS2={self._sys2_enabled})")
+        # Echo state back to UI
+        self.ui.broadcast_lipsync_state(self._sys1_enabled, self._sys2_enabled)
+
+    # ── Live latency instrumentation ──────────────────────────────────────────
+    def _lat_reset(self):
+        """Start a fresh per-turn latency record and return the previous one."""
+        self._lat = {"t_audio_first": None, "t_text_first": None,
+                     "t_sys1_ready": None, "t_turn_complete": None,
+                     "t_dispatch": None, "t_ready": None,
+                     "n_audio_bytes": 0,
+                     "sys1": self._sys1_enabled, "sys2": self._sys2_enabled}
+
+    def _lat_stamp(self, key: str, rec: dict | None = None):
+        """Record perf_counter for `key` once per turn (first occurrence wins)."""
+        rec = self._lat if rec is None else rec
+        if key in rec and rec[key] is None:
+            rec[key] = time.perf_counter()
+
+    def _lat_write(self, rec: dict | None = None, extra: dict | None = None):
+        """Finalize a turn's latency record: derive deltas, append JSONL."""
+        L = dict(self._lat if rec is None else rec)
+        if extra:
+            L.update(extra)
+        a = L.get("t_audio_first")
+        if a is None:
+            return  # nothing to log (e.g. tool-only turn)
+        rec = {
+            "sys1": L.get("sys1"), "sys2": L.get("sys2"),
+            "audio_dur_ms": round(L["n_audio_bytes"] / 2 / RECEIVE_SAMPLE_RATE * 1e3, 1),
+        }
+        def dms(t0, t1):
+            return None if (t0 is None or t1 is None) else round((t1 - t0) * 1e3, 2)
+        # SYS2 live components
+        rec["buffer_ms"]        = dms(a, L.get("t_turn_complete"))     # first audio → turn end
+        rec["inference_xport_ms"] = dms(L.get("t_dispatch"), L.get("t_ready"))
+        rec["sys2_added_ms"]    = dms(a, L.get("t_ready"))            # glass-to-glass
+        rec["generation_ms"]    = L.get("generation_ms")
+        # SYS1 live components
+        rec["text_lead_ms"]     = dms(a, L.get("t_text_first"))       # +ve: text after audio
+        rec["sys1_added_ms"]    = dms(L.get("t_text_first"), L.get("t_sys1_ready"))
+        try:
+            self._lat_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._lat_lock:
+                with open(self._lat_path, "a") as f:
+                    f.write(json.dumps(rec) + "\n")
+        except Exception as e:
+            print(f"[Latency] ⚠️  {e}")
+        print(f"[Latency] {rec}")
 
     def set_speaking(self, value: bool):
         with self._speaking_lock:
@@ -683,6 +760,7 @@ class AtlasLive:
             for k in CHANNELS:
                 current[k] += alpha * (scaled.get(k, 0.0) - current[k])
 
+            self._lat_stamp("t_sys1_ready")  # first real mouth render this turn
             self.ui.set_avatar_blendshapes({
                 'jawOpen':             current['JawOpen'],
                 'mouthClose':          current['MouthClose'],
@@ -703,12 +781,14 @@ class AtlasLive:
 
         self._viseme_running = False
 
-    def _dispatch_avatar(self, pcm_bytes: bytes, text: str):
-        """Send audio turn to lipsync service and broadcast result to avatar UI."""
+    def _dispatch_avatar(self, pcm_bytes: bytes, text: str, lat: dict | None = None):
+        """Send audio turn to lipsync service and broadcast result to avatar UI.
+        `lat` is the per-turn latency record captured at dispatch time."""
         try:
             from lipsync.client import get_blendshapes, amplitude_fallback, is_available
             emotion = _detect_emotion(text)
             self.ui.set_avatar_emotion("thinking")
+            self._lat_stamp("t_dispatch", lat)
             result = get_blendshapes(pcm_bytes) if is_available() else None
             if result is None:
                 result = amplitude_fallback(pcm_bytes)
@@ -720,6 +800,9 @@ class AtlasLive:
                 emotion    = emotion,
                 text       = text,
             )
+            self._lat_stamp("t_ready", lat)
+            if lat is not None:
+                self._lat_write(lat, {"generation_ms": result.get("generation_ms")})
         except Exception as e:
             print(f"[Avatar] ⚠️  {e}")
 
@@ -942,6 +1025,7 @@ class AtlasLive:
         print("[ATLAS] 👂 Recv started")
         out_buf, in_buf = [], []
         self._emotion_event = asyncio.Event()
+        self._lat_reset()
 
         try:
             while True:
@@ -950,6 +1034,8 @@ class AtlasLive:
                     if response.data:
                         if self._turn_done_event and self._turn_done_event.is_set():
                             self._turn_done_event.clear()
+                        self._lat_stamp("t_audio_first")
+                        self._lat["n_audio_bytes"] += len(response.data)
                         self.audio_in_queue.put_nowait(response.data)
                         self._audio_buffer.append(response.data)
                         self._drive_jaw_realtime(response.data)
@@ -977,9 +1063,11 @@ class AtlasLive:
                                         self._emotion_sent_at = now
                                         self.ui.set_avatar_emotion(emo)
 
-                                # Feed text to persistent viseme worker
-                                self._ensure_viseme_worker()
-                                self._viseme_q.put(txt)
+                                # Feed text to persistent viseme worker (SYS1)
+                                if self._sys1_enabled:
+                                    self._lat_stamp("t_text_first")
+                                    self._ensure_viseme_worker()
+                                    self._viseme_q.put(txt)
 
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = _clean_transcript(sc.input_transcription.text)
@@ -989,6 +1077,7 @@ class AtlasLive:
                         if sc.turn_complete:
                             if self._turn_done_event:
                                 self._turn_done_event.set()
+                            self._lat_stamp("t_turn_complete")
 
                             full_in = " ".join(in_buf).strip()
                             if full_in:
@@ -1006,6 +1095,24 @@ class AtlasLive:
                             self._viseme_running = False
                             self.ui.set_avatar_jaw(0.0)
                             self.ui.set_avatar_emotion(_detect_emotion(full_out))
+
+                            # SYS2: post-turn HuBERT neural blendshapes.
+                            # Audio was suppressed live (see _play_audio), so the
+                            # browser plays audio+mouth synced via avatar_data.
+                            # _dispatch_avatar finalizes the latency record itself
+                            # (after inference). For SYS1/none, write it here.
+                            if self._sys2_enabled and self._audio_buffer:
+                                pcm = b"".join(self._audio_buffer)
+                                lat = self._lat  # capture this turn's record
+                                threading.Thread(
+                                    target=self._dispatch_avatar,
+                                    args=(pcm, full_out, lat),
+                                    daemon=True,
+                                ).start()
+                            else:
+                                self._lat_write()
+                            self._lat_reset()  # fresh record for next turn
+
                             # Reset for next turn
                             self._new_turn = True
                             self._emotion_event = asyncio.Event()
@@ -1074,7 +1181,10 @@ class AtlasLive:
                             )
                         except asyncio.TimeoutError:
                             pass
-                await asyncio.to_thread(stream.write, chunk)
+                # SYS2 mode: suppress live audio — browser plays it synced with
+                # HuBERT mouth after the turn (avoids double audio).
+                if not self._sys2_enabled:
+                    await asyncio.to_thread(stream.write, chunk)
                 self._drive_mouth_from_chunk(chunk)
 
         except Exception as e:

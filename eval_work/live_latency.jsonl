@@ -1,0 +1,12 @@
+{"sys1": true, "sys2": false, "audio_dur_ms": 1920.0, "buffer_ms": 1882.35, "inference_xport_ms": null, "sys2_added_ms": null, "generation_ms": null, "text_lead_ms": -392.16, "sys1_added_ms": 20.33}
+{"sys1": true, "sys2": false, "audio_dur_ms": 4320.0, "buffer_ms": 4406.36, "inference_xport_ms": null, "sys2_added_ms": null, "generation_ms": null, "text_lead_ms": -302.91, "sys1_added_ms": 20.69}
+{"sys1": true, "sys2": false, "audio_dur_ms": 2040.0, "buffer_ms": 2012.68, "inference_xport_ms": null, "sys2_added_ms": null, "generation_ms": null, "text_lead_ms": -327.16, "sys1_added_ms": 20.42}
+{"sys1": true, "sys2": false, "audio_dur_ms": 3840.0, "buffer_ms": 3858.22, "inference_xport_ms": null, "sys2_added_ms": null, "generation_ms": null, "text_lead_ms": -326.6, "sys1_added_ms": 20.7}
+{"sys1": true, "sys2": false, "audio_dur_ms": 3960.0, "buffer_ms": 4037.6, "inference_xport_ms": null, "sys2_added_ms": null, "generation_ms": null, "text_lead_ms": -410.83, "sys1_added_ms": 21.06}
+{"sys1": true, "sys2": false, "audio_dur_ms": 4320.0, "buffer_ms": 4296.83, "inference_xport_ms": null, "sys2_added_ms": null, "generation_ms": null, "text_lead_ms": -305.9, "sys1_added_ms": 21.19}
+{"sys1": true, "sys2": false, "audio_dur_ms": 3080.0, "buffer_ms": 3037.33, "inference_xport_ms": null, "sys2_added_ms": null, "generation_ms": null, "text_lead_ms": -378.67, "sys1_added_ms": 20.28}
+{"sys1": true, "sys2": false, "audio_dur_ms": 2680.0, "buffer_ms": 2657.63, "inference_xport_ms": 1111.75, "sys2_added_ms": 3793.81, "generation_ms": 1084.52, "text_lead_ms": null, "sys1_added_ms": null}
+{"sys1": false, "sys2": true, "audio_dur_ms": 2160.0, "buffer_ms": 2244.73, "inference_xport_ms": 1035.33, "sys2_added_ms": 3280.57, "generation_ms": 1009.73, "text_lead_ms": null, "sys1_added_ms": null}
+{"sys1": false, "sys2": true, "audio_dur_ms": 2720.0, "buffer_ms": 2625.85, "inference_xport_ms": 1121.12, "sys2_added_ms": 3747.61, "generation_ms": 1095.96, "text_lead_ms": null, "sys1_added_ms": null}
+{"sys1": false, "sys2": true, "audio_dur_ms": 3680.0, "buffer_ms": 3659.02, "inference_xport_ms": 2311.96, "sys2_added_ms": 5971.31, "generation_ms": 2280.48, "text_lead_ms": null, "sys1_added_ms": null}
+{"sys1": false, "sys2": true, "audio_dur_ms": 4080.0, "buffer_ms": 4057.86, "inference_xport_ms": 2727.44, "sys2_added_ms": 6785.71, "generation_ms": 2689.83, "text_lead_ms": null, "sys1_added_ms": null}
