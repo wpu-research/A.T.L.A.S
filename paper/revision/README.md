@@ -1,5 +1,7 @@
 # TranscriptionSync — revision experiments
 
+The canonical, archived copy of these scripts is the transcription-sync repository (https://github.com/wpu-research/transcription-sync). The scripts in this folder are MIT-licensed (see LICENSE here); the rest of this repository is CC BY-NC 4.0 (see the root LICENSE).
+
 Scripts behind the revised evaluation of *TranscriptionSync: Training-Free Lip
 Synchronization for Native-Audio Large Language Models*. No data or model weights
 are included; every script downloads or derives what it needs.

@@ -5,7 +5,14 @@ authors:
   - family-names: Arslan
     given-names: Murat
     affiliation: "Altınbaş Cyprus University"
-license: MIT
+license: CC-BY-NC-4.0
 repository-code: "https://github.com/wpu-research/A.T.L.A.S"
 version: "1.0.0"
 date-released: "2026-09-27"
+references:
+  - type: software
+    title: "Atlas-MK37 (MARK XXXVII)"
+    authors:
+      - name: FatihMakes
+    url: "https://github.com/FatihMakes/Atlas-MK37"
+    license: CC-BY-NC-4.0
