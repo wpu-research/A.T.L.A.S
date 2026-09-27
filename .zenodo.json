@@ -1,0 +1,11 @@
+{
+  "title": "A.T.L.A.S and TranscriptionSync: code and evaluation scripts for training-free lip synchronization of native-audio LLMs",
+  "upload_type": "software",
+  "description": "Source code of the A.T.L.A.S embodied desktop assistant and the TranscriptionSync lip-synchronization pipeline, together with the experiment scripts of the revised evaluation (paper/revision): wall-clock Layer-1 latency, streaming CTC alignment of the Live API transcription, video-measured GRID evaluation including an Audio2Face-3D port, re-trained audio-to-blendshape regressors, SyncNet offset tests and a re-collected Gemini Live evaluation (English and Turkish). No datasets or model weights are included.",
+  "creators": [
+    {"name": "Arslan, Murat", "affiliation": "Altınbaş Cyprus University, Department of Software Engineering"}
+  ],
+  "license": "MIT",
+  "keywords": ["lip synchronization", "viseme synthesis", "ARKit blendshapes", "speech-to-speech models", "forced alignment", "embodied conversational agents", "Gemini Live"],
+  "access_right": "open"
+}

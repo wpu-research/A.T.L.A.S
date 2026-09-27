@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "A.T.L.A.S and TranscriptionSync: code and evaluation scripts for training-free lip synchronization of native-audio LLMs"
+authors:
+  - family-names: Arslan
+    given-names: Murat
+    affiliation: "Altınbaş Cyprus University"
+license: MIT
+repository-code: "https://github.com/wpu-research/A.T.L.A.S"
+version: "1.0.0"
+date-released: "2026-09-27"
