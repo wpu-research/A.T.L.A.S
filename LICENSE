@@ -1,21 +1,21 @@
-MIT License
+A.T.L.A.S — licensing
 
-Copyright (c) 2026 Murat Arslan
+1. Base code (everything except paper/revision/)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+   This repository extends Atlas-MK37 ("MARK XXXVII"), an open-source personal AI
+   assistant by FatihMakes (https://github.com/FatihMakes/Atlas-MK37;
+   https://www.youtube.com/@FatihMakes), which is licensed under the
+   Creative Commons Attribution-NonCommercial 4.0 International License
+   (CC BY-NC 4.0, https://creativecommons.org/licenses/by-nc/4.0/).
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+   The original work and the modifications and additions made to it in this
+   repository by Murat Arslan (wpu-research) are distributed under the same
+   CC BY-NC 4.0 license. You must give appropriate credit to FatihMakes and to
+   Murat Arslan, indicate if changes were made, and you may not use the material
+   for commercial purposes.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Revision experiments (paper/revision/)
+
+   The experiment scripts under paper/revision/ were written for the
+   TranscriptionSync revision and are licensed under the MIT License
+   (see paper/revision/LICENSE).

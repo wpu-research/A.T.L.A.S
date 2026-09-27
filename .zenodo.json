@@ -1,11 +1,36 @@
 {
   "title": "A.T.L.A.S and TranscriptionSync: code and evaluation scripts for training-free lip synchronization of native-audio LLMs",
   "upload_type": "software",
-  "description": "Source code of the A.T.L.A.S embodied desktop assistant and the TranscriptionSync lip-synchronization pipeline, together with the experiment scripts of the revised evaluation (paper/revision): wall-clock Layer-1 latency, streaming CTC alignment of the Live API transcription, video-measured GRID evaluation including an Audio2Face-3D port, re-trained audio-to-blendshape regressors, SyncNet offset tests and a re-collected Gemini Live evaluation (English and Turkish). No datasets or model weights are included.",
+  "description": "A.T.L.A.S extends the open-source Atlas-MK37 personal assistant by FatihMakes (https://github.com/FatihMakes/Atlas-MK37, CC BY-NC 4.0) with a browser VRM avatar, the TranscriptionSync lip-synchronization pipeline and the experiment scripts of the revised evaluation (paper/revision): wall-clock Layer-1 latency, streaming CTC alignment of the Live API transcription, video-measured GRID evaluation including an Audio2Face-3D port, re-trained audio-to-blendshape regressors, SyncNet offset tests and a re-collected Gemini Live evaluation (English and Turkish). Licensing: base code and modifications CC BY-NC 4.0; paper/revision scripts MIT. No datasets or model weights are included. Version 1.0.0 of this record was published with incorrect license metadata (MIT); the base code is CC BY-NC 4.0.",
   "creators": [
-    {"name": "Arslan, Murat", "affiliation": "Altınbaş Cyprus University, Department of Software Engineering"}
+    {
+      "name": "Arslan, Murat",
+      "affiliation": "Altınbaş Cyprus University, Department of Software Engineering"
+    }
   ],
-  "license": "MIT",
-  "keywords": ["lip synchronization", "viseme synthesis", "ARKit blendshapes", "speech-to-speech models", "forced alignment", "embodied conversational agents", "Gemini Live"],
-  "access_right": "open"
+  "license": "cc-by-nc-4.0",
+  "keywords": [
+    "lip synchronization",
+    "viseme synthesis",
+    "ARKit blendshapes",
+    "speech-to-speech models",
+    "forced alignment",
+    "embodied conversational agents",
+    "Gemini Live"
+  ],
+  "access_right": "open",
+  "contributors": [
+    {
+      "name": "FatihMakes",
+      "type": "Other",
+      "affiliation": "Author of Atlas-MK37 (base code)"
+    }
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/FatihMakes/Atlas-MK37",
+      "relation": "isDerivedFrom",
+      "scheme": "url"
+    }
+  ]
 }
