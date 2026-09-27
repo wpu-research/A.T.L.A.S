@@ -14,7 +14,7 @@ are included; every script downloads or derives what it needs.
 * **SyncNet.** LSE-C/LSE-D do not respond to ±200 ms offsets on the untextured avatar; the offset estimate does (slope 1.00, +58 ms bias).
 * **GRID distribution.** `audio_25k` is silence-trimmed (mean 432 ms) relative to `.align`/video; 22/34 folders of `alignments.zip` hold another speaker's alignments. The V-G regressors were re-trained on the videos' own audio.
 
-The revised manuscript is in `manuscript/` (`paper_rev.md` → `build_rev.py` → `TranscriptionSync_revised.docx`).
+The revised manuscript is in `manuscript/` (`paper_rev.md` → `build_rev.py` → `TranscriptionSync_revised.docx`); the IEEE Access version is in `manuscript/ieee/`.
 
 ## Layout expected at run time
 
