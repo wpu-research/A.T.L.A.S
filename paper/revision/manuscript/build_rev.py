@@ -60,6 +60,7 @@ B = {
  'tinyv2f': 'Z. Han, M. Teye, D. Yadgaroff, and J. Bütepage, "Tiny is not small enough: High-quality, low-resource facial animation models through hybrid knowledge distillation," *ACM Trans. Graph.*, vol. 44, no. 4, 2025, doi: 10.1145/3730929.',
  'w2v2': 'A. Baevski, Y. Zhou, A. Mohamed, and M. Auli, "wav2vec 2.0: A framework for self-supervised learning of speech representations," in *Adv. Neural Inf. Process. Syst.*, vol. 33, 2020, pp. 12449–12460.',
  'mms': 'V. Pratap et al., "Scaling speech technology to 1,000+ languages," *J. Mach. Learn. Res.*, vol. 25, no. 97, pp. 1–52, 2024.',
+ 'atlasmk37': 'FatihMakes, "Atlas-MK37 (MARK XXXVII): Cross-platform personal AI assistant," GitHub repository, 2026. [Online]. Available: https://github.com/FatihMakes/Atlas-MK37',
  'fleurs': 'A. Conneau et al., "FLEURS: Few-shot learning evaluation of universal representations of speech," in *Proc. IEEE Spoken Language Technology Workshop (SLT)*, 2022, pp. 798–805.',
  'lrs3': 'T. Afouras, J. S. Chung, and A. Zisserman, "LRS3-TED: A large-scale dataset for visual speech recognition," *arXiv:1809.00496*, 2018.',
  'avhubert': 'B. Shi, W.-N. Hsu, K. Lakhotia, and A. Mohamed, "Learning audio-visual speech representation by masked multimodal cluster prediction," in *Proc. ICLR*, 2022.',
